@@ -547,7 +547,6 @@ namespace gtl
         std::vector<std::string> captureFirstRowRegion(const calibration::CoordinateSet &coords, bool quietMode)
         {
             std::vector<std::string> detectedLines;
-#if defined(__APPLE__)
             std::string ocrError;
             detectedLines = macos_native::recognizeTextInRegion(coords.cropX,
                                                                  coords.cropY,
@@ -558,10 +557,6 @@ namespace gtl
             {
                 console::printError(ocrError);
             }
-#else
-            (void)coords;
-            (void)quietMode;
-#endif
             return detectedLines;
         }
 

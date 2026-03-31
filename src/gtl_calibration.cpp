@@ -424,6 +424,16 @@ namespace gtl::calibration
         coords.cropHeight = cropBottomY - coords.cropY;
 
         console::printSuccess("\nCapture complete! Values below can be used as environment overrides if needed:\n");
+#if defined(_WIN32)
+        std::cout << "set DUSKULL_REFRESH_X=" << coords.refreshX << "\n";
+        std::cout << "set DUSKULL_REFRESH_Y=" << coords.refreshY << "\n";
+        std::cout << "set DUSKULL_BUY_X=" << coords.buyX << "\n";
+        std::cout << "set DUSKULL_BUY_Y=" << coords.buyY << "\n";
+        std::cout << "set DUSKULL_FIRST_ROW_CROP_X=" << coords.cropX << "\n";
+        std::cout << "set DUSKULL_FIRST_ROW_CROP_Y=" << coords.cropY << "\n";
+        std::cout << "set DUSKULL_FIRST_ROW_CROP_W=" << coords.cropWidth << "\n";
+        std::cout << "set DUSKULL_FIRST_ROW_CROP_H=" << coords.cropHeight << "\n\n";
+#else
         std::cout << "export DUSKULL_REFRESH_X=" << coords.refreshX << "\n";
         std::cout << "export DUSKULL_REFRESH_Y=" << coords.refreshY << "\n";
         std::cout << "export DUSKULL_BUY_X=" << coords.buyX << "\n";
@@ -432,6 +442,7 @@ namespace gtl::calibration
         std::cout << "export DUSKULL_FIRST_ROW_CROP_Y=" << coords.cropY << "\n";
         std::cout << "export DUSKULL_FIRST_ROW_CROP_W=" << coords.cropWidth << "\n";
         std::cout << "export DUSKULL_FIRST_ROW_CROP_H=" << coords.cropHeight << "\n\n";
+#endif
     }
 
     bool prepareCoordinatesForCurrentDisplay(CoordinateSet &coords,
