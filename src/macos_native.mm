@@ -1,7 +1,7 @@
 // Duskull
 // macos_native.mm
-// Created by spiderguts on 3/29/26 at 11:20 PM.
-// Copyright © 2026 spiderguts. All rights reserved.
+// Created by Duskull Project on 3/29/26 at 11:20 PM.
+// Copyright © 2026 Duskull Project. All rights reserved.
 
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreGraphics/CoreGraphics.h>

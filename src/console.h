@@ -1,7 +1,7 @@
 // Duskull
 // console.h
-// Created by spiderguts on 3/29/26 at 1:03 AM.
-// Copyright © 2026 spiderguts. All rights reserved.
+// Created by Duskull Project on 3/29/26 at 1:03 AM.
+// Copyright © 2026 Duskull Project. All rights reserved.
 
 #pragma once
 

@@ -1,7 +1,7 @@
 // Duskull
 // windows_platform.cpp
-// Created by spiderguts on 3/31/26 at 9:06 AM.
-// Copyright © 2026 spiderguts. All rights reserved.
+// Created by Duskull Project on 3/31/26 at 9:06 AM.
+// Copyright © 2026 Duskull Project. All rights reserved.
 //
 // Windows implementation of the macos_native namespace.
 // Compiled only on Windows (MSVC cl.exe with Windows 10+ SDK / C++/WinRT).
@@ -37,6 +37,14 @@
 
 // IMemoryBufferByteAccess — COM interface for writing raw pixels into SoftwareBitmap
 #include <robuffer.h>
+
+#ifndef __IMemoryBufferByteAccess_INTERFACE_DEFINED__
+#define __IMemoryBufferByteAccess_INTERFACE_DEFINED__
+struct __declspec(uuid("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D")) IMemoryBufferByteAccess : ::IUnknown
+{
+    virtual HRESULT __stdcall GetBuffer(BYTE **value, UINT32 *capacity) = 0;
+};
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -543,7 +551,7 @@ namespace macos_native
             {
                 error = "Could not create Windows OCR engine. "
                         "Ensure an OCR language pack is installed "
-                        "(Settings \u2192 Time & Language \u2192 Language & Region).";
+                        "(Settings -> Time & Language -> Language & Region).";
                 return result;
             }
 

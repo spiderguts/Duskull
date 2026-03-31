@@ -1,7 +1,7 @@
 // Duskull
 // main.cpp
-// Created by spiderguts on 3/22/26 at 2:14 AM.
-// Copyright © 2026 spiderguts. All rights reserved.
+// Created by Duskull Project on 3/22/26 at 2:14 AM.
+// Copyright © 2026 Duskull Project. All rights reserved.
 
 #include <iostream>
 #include <array>
@@ -47,7 +47,7 @@ namespace
 int main()
 {
     std::cout << "\nDuskull " << kVersion << "\n"
-              << "Copyright (c) 2026 spiderguts. All rights reserved.\n";
+              << "Copyright (c) 2026 Duskull Project. All rights reserved.\n";
 
     if (isTruthyEnvValue(std::getenv("DUSKULL_SELF_TEST")))
     {

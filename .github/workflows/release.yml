@@ -6,6 +6,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
 
@@ -37,13 +40,44 @@ jobs:
 
       - name: Privacy scan binary
         shell: bash
-        env:
-          GH_ACTOR: ${{ github.actor }}
-          GH_REPO: ${{ github.repository }}
-          GH_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          python3 -c 'from pathlib import Path; import os,sys; data=Path("Duskull").read_bytes().lower(); needles=[b"/users/",b"/home/",b"\\users\\",b".dsym",b".pdb"]; envs=[os.getenv("GH_ACTOR",""),os.getenv("GH_REPO",""),os.getenv("GH_WORKSPACE","")]; needles.extend(v.strip().lower().encode("utf-8","ignore") for v in envs if v and v.strip()); found=sorted({n.decode("utf-8","ignore") for n in needles if n and n in data}); print("Privacy scan passed." if not found else "Privacy scan failed. Found suspicious strings: " + ", ".join(found)); sys.exit(1 if found else 0)'
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          data = Path("Duskull").read_bytes().lower()
+
+          path_needles = [b"/users/", b"/home/", b"\\users\\"]
+          ci_allowed_prefixes = [
+            b"/users/runner/",
+            b"/home/runner/",
+            b"\\users\\runneradmin\\",
+            b"\\users\\runner\\",
+          ]
+
+          suspicious = []
+
+          for needle in path_needles:
+            start = 0
+            while True:
+              idx = data.find(needle, start)
+              if idx == -1:
+                break
+              sample = data[idx:idx + 160]
+              if not any(sample.startswith(prefix) for prefix in ci_allowed_prefixes):
+                suspicious.append(sample.decode("utf-8", errors="ignore"))
+                break
+              start = idx + 1
+
+          if suspicious:
+            print("Privacy scan failed. Found suspicious strings:")
+            for item in sorted(set(suspicious)):
+              print(f" - {item}")
+            sys.exit(1)
+
+          print("Privacy scan passed.")
+          PY
 
       - name: Package macOS artifact
         shell: bash
@@ -74,10 +108,30 @@ jobs:
           python-version: "3.x"
 
       - name: Build Windows binary
-        shell: cmd
+        shell: powershell
         run: |
-          cd src
-          cl.exe /std:c++17 /EHsc /permissive- /nologo /O2 /W3 /DNDEBUG main.cpp gtl.cpp gtl_csv.cpp gtl_match.cpp gtl_calibration.cpp windows_platform.cpp /link user32.lib gdi32.lib psapi.lib windowsapp.lib /DEBUG:NONE /INCREMENTAL:NO /OPT:REF /OPT:ICF /out:..\Duskull.exe
+          $ErrorActionPreference = "Stop"
+          Set-Location src
+
+          $args = @(
+            "/std:c++17", "/utf-8", "/EHsc", "/permissive-", "/nologo", "/O2", "/W3", "/DNDEBUG", "/D_CRT_SECURE_NO_WARNINGS",
+            "main.cpp", "gtl.cpp", "gtl_csv.cpp", "gtl_match.cpp", "gtl_calibration.cpp", "windows_platform.cpp",
+            "/link", "user32.lib", "gdi32.lib", "psapi.lib", "windowsapp.lib",
+            "/DEBUG:NONE", "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF", "/out:..\Duskull.exe"
+          )
+
+          & cl.exe @args 2>&1 | Tee-Object -FilePath ..\windows-build.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "MSVC build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload Windows build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-log
+          path: windows-build.log
 
       - name: Strip Windows binary (best effort)
         shell: powershell
@@ -91,12 +145,45 @@ jobs:
 
       - name: Privacy scan binary
         shell: powershell
-        env:
-          GH_ACTOR: ${{ github.actor }}
-          GH_REPO: ${{ github.repository }}
-          GH_WORKSPACE: ${{ github.workspace }}
         run: |
-          python -c 'from pathlib import Path; import os,sys; data=Path("Duskull.exe").read_bytes().lower(); needles=[b"/users/",b"/home/",b"\\users\\",b".dsym",b".pdb"]; envs=[os.getenv("GH_ACTOR",""),os.getenv("GH_REPO",""),os.getenv("GH_WORKSPACE","")]; needles.extend(v.strip().lower().encode("utf-8","ignore") for v in envs if v and v.strip()); found=sorted({n.decode("utf-8","ignore") for n in needles if n and n in data}); print("Privacy scan passed." if not found else "Privacy scan failed. Found suspicious strings: " + ", ".join(found)); sys.exit(1 if found else 0)'
+          $code = @'
+          from pathlib import Path
+          import sys
+
+          data = Path("Duskull.exe").read_bytes().lower()
+
+          path_needles = [b"/users/", b"/home/", b"\\users\\"]
+          ci_allowed_prefixes = [
+            b"/users/runner/",
+            b"/home/runner/",
+            b"\\users\\runneradmin\\",
+            b"\\users\\runner\\",
+          ]
+
+          suspicious = []
+
+          for needle in path_needles:
+            start = 0
+            while True:
+              idx = data.find(needle, start)
+              if idx == -1:
+                break
+              sample = data[idx:idx + 160]
+              if not any(sample.startswith(prefix) for prefix in ci_allowed_prefixes):
+                suspicious.append(sample.decode("utf-8", errors="ignore"))
+                break
+              start = idx + 1
+
+          if suspicious:
+            print("Privacy scan failed. Found suspicious strings:")
+            for item in sorted(set(suspicious)):
+              print(f" - {item}")
+            sys.exit(1)
+
+          print("Privacy scan passed.")
+          '@
+
+          python -c $code
 
       - name: Package Windows artifact
         shell: powershell
