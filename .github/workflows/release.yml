@@ -43,40 +43,7 @@ jobs:
           GH_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          import sys
-
-          binary = Path("Duskull")
-          data = binary.read_bytes()
-          low = data.lower()
-
-          needles = {
-            b"/users/",
-            b"/home/",
-            b"\\users\\",
-            b".dsym",
-            b".pdb",
-          }
-
-          actor = os.environ.get("GH_ACTOR", "").strip().lower()
-          repo = os.environ.get("GH_REPO", "").strip().lower()
-          workspace = os.environ.get("GH_WORKSPACE", "").strip().lower()
-
-          for value in (actor, repo, workspace):
-              if value:
-                needles.add(value.encode("utf-8", errors="ignore"))
-
-          found = sorted(s.decode("utf-8", errors="ignore") for s in needles if s and s in low)
-          if found:
-              print("Privacy scan failed. Found suspicious strings:")
-              for item in found:
-                  print(f" - {item}")
-              sys.exit(1)
-
-          print("Privacy scan passed.")
-          PY
+          python3 -c 'from pathlib import Path; import os,sys; data=Path("Duskull").read_bytes().lower(); needles=[b"/users/",b"/home/",b"\\users\\",b".dsym",b".pdb"]; envs=[os.getenv("GH_ACTOR",""),os.getenv("GH_REPO",""),os.getenv("GH_WORKSPACE","")]; needles.extend(v.strip().lower().encode("utf-8","ignore") for v in envs if v and v.strip()); found=sorted({n.decode("utf-8","ignore") for n in needles if n and n in data}); print("Privacy scan passed." if not found else "Privacy scan failed. Found suspicious strings: " + ", ".join(found)); sys.exit(1 if found else 0)'
 
       - name: Package macOS artifact
         shell: bash
@@ -129,42 +96,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_WORKSPACE: ${{ github.workspace }}
         run: |
-          $code = @'
-          from pathlib import Path
-          import os
-          import sys
-
-          binary = Path("Duskull.exe")
-          data = binary.read_bytes()
-          low = data.lower()
-
-          needles = {
-            b"/users/",
-            b"/home/",
-            b"\\users\\",
-            b".dsym",
-            b".pdb",
-          }
-
-          actor = os.environ.get("GH_ACTOR", "").strip().lower()
-          repo = os.environ.get("GH_REPO", "").strip().lower()
-          workspace = os.environ.get("GH_WORKSPACE", "").strip().lower()
-
-          for value in (actor, repo, workspace):
-              if value:
-                needles.add(value.encode("utf-8", errors="ignore"))
-
-          found = sorted(s.decode("utf-8", errors="ignore") for s in needles if s and s in low)
-          if found:
-              print("Privacy scan failed. Found suspicious strings:")
-              for item in found:
-                  print(f" - {item}")
-              sys.exit(1)
-
-          print("Privacy scan passed.")
-          '@
-
-          python -c $code
+          python -c 'from pathlib import Path; import os,sys; data=Path("Duskull.exe").read_bytes().lower(); needles=[b"/users/",b"/home/",b"\\users\\",b".dsym",b".pdb"]; envs=[os.getenv("GH_ACTOR",""),os.getenv("GH_REPO",""),os.getenv("GH_WORKSPACE","")]; needles.extend(v.strip().lower().encode("utf-8","ignore") for v in envs if v and v.strip()); found=sorted({n.decode("utf-8","ignore") for n in needles if n and n in data}); print("Privacy scan passed." if not found else "Privacy scan failed. Found suspicious strings: " + ", ".join(found)); sys.exit(1 if found else 0)'
 
       - name: Package Windows artifact
         shell: powershell
