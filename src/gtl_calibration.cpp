@@ -34,6 +34,62 @@ namespace gtl::calibration
             return (start < end) ? std::string(start, end) : std::string();
         }
 
+        bool existingPathContainsSymlink(const std::filesystem::path &path,
+                                         std::filesystem::path &symlinkPath)
+        {
+            if (path.empty())
+            {
+                return false;
+            }
+
+            const auto normalized = path.lexically_normal();
+            std::filesystem::path current = normalized.root_path();
+
+            for (const auto &part : normalized.relative_path())
+            {
+                current /= part;
+
+                std::error_code statusError;
+                const auto status = std::filesystem::symlink_status(current, statusError);
+                if (statusError)
+                {
+                    continue;
+                }
+
+                if (!std::filesystem::exists(status))
+                {
+                    break;
+                }
+
+                if (std::filesystem::is_symlink(status))
+                {
+                    symlinkPath = current;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        bool setOwnerOnlyPermissions(const std::filesystem::path &targetPath,
+                                     std::string &error)
+        {
+            std::error_code permissionsError;
+            std::filesystem::permissions(targetPath,
+                                         std::filesystem::perms::owner_read |
+                                             std::filesystem::perms::owner_write,
+                                         std::filesystem::perm_options::replace,
+                                         permissionsError);
+            if (permissionsError)
+            {
+                error = "Failed to set secure file permissions on '" + targetPath.string() + "': " +
+                        permissionsError.message();
+                return false;
+            }
+
+            return true;
+        }
+
         bool validateAndClampCoordinates(CoordinateSet &coords,
                                          const macos_native::DisplayMetrics &metrics,
                                          std::string &diagnostic)
@@ -145,11 +201,24 @@ namespace gtl::calibration
             const std::filesystem::path parent = targetPath.parent_path();
             if (!parent.empty())
             {
+                std::filesystem::path symlinkPath;
+                if (existingPathContainsSymlink(parent, symlinkPath))
+                {
+                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
+                    return false;
+                }
+
                 std::error_code dirError;
                 std::filesystem::create_directories(parent, dirError);
                 if (dirError)
                 {
                     error = "Failed to create directory: " + dirError.message();
+                    return false;
+                }
+
+                if (existingPathContainsSymlink(parent, symlinkPath))
+                {
+                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
                     return false;
                 }
             }
@@ -188,7 +257,16 @@ namespace gtl::calibration
             std::filesystem::rename(tempPath, targetPath, replaceError);
             if (!replaceError)
             {
-                return true;
+                return setOwnerOnlyPermissions(targetPath, error);
+            }
+
+            std::error_code secondStatusError;
+            const auto secondStatus = std::filesystem::symlink_status(targetPath, secondStatusError);
+            if (!secondStatusError && std::filesystem::exists(secondStatus) && std::filesystem::is_symlink(secondStatus))
+            {
+                std::filesystem::remove(tempPath);
+                error = "Refusing to replace symlinked target after rename retry: '" + targetPath.string() + "'.";
+                return false;
             }
 
             std::error_code removeError;
@@ -197,7 +275,7 @@ namespace gtl::calibration
             std::filesystem::rename(tempPath, targetPath, secondRenameError);
             if (!secondRenameError)
             {
-                return true;
+                return setOwnerOnlyPermissions(targetPath, error);
             }
 
             std::filesystem::remove(tempPath);
@@ -224,7 +302,11 @@ namespace gtl::calibration
             {
                 return std::stoll(value);
             }
-            catch (...)
+            catch (const std::invalid_argument &)
+            {
+                return std::nullopt;
+            }
+            catch (const std::out_of_range &)
             {
                 return std::nullopt;
             }
@@ -297,7 +379,12 @@ namespace gtl::calibration
             {
                 parsedValue = std::stoll(valueText);
             }
-            catch (...)
+            catch (const std::invalid_argument &)
+            {
+                diagnostic = "Invalid number for key '" + key + "' in config file.";
+                return false;
+            }
+            catch (const std::out_of_range &)
             {
                 diagnostic = "Invalid number for key '" + key + "' in config file.";
                 return false;

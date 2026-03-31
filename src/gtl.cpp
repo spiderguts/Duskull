@@ -71,6 +71,70 @@ namespace gtl
             return (start < end) ? std::string(start, end) : std::string();
         }
 
+        std::string sanitizeForTerminal(std::string_view text)
+        {
+            std::string out;
+            out.reserve(text.size());
+            for (const unsigned char ch : text)
+            {
+                const bool keep = ch == '\t' || ch == '\n' || (ch >= 32 && ch != 127);
+                out.push_back(keep ? static_cast<char>(ch) : '?');
+            }
+            return out;
+        }
+
+        bool existingPathContainsSymlink(const fs::path &path, fs::path &symlinkPath)
+        {
+            if (path.empty())
+            {
+                return false;
+            }
+
+            const auto normalized = path.lexically_normal();
+            fs::path current = normalized.root_path();
+
+            for (const auto &part : normalized.relative_path())
+            {
+                current /= part;
+
+                std::error_code statusError;
+                const auto status = fs::symlink_status(current, statusError);
+                if (statusError)
+                {
+                    continue;
+                }
+
+                if (!fs::exists(status))
+                {
+                    break;
+                }
+
+                if (fs::is_symlink(status))
+                {
+                    symlinkPath = current;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        bool setOwnerOnlyPermissions(const fs::path &targetPath, std::string &error)
+        {
+            std::error_code permissionsError;
+            fs::permissions(targetPath,
+                            fs::perms::owner_read | fs::perms::owner_write,
+                            fs::perm_options::replace,
+                            permissionsError);
+            if (permissionsError)
+            {
+                error = "Error setting secure permissions on '" + targetPath.string() + "': " + permissionsError.message();
+                return false;
+            }
+
+            return true;
+        }
+
         bool isValidFileName(std::string_view name)
         {
             if (name.empty())
@@ -200,7 +264,11 @@ namespace gtl
                             ivs.push_back(static_cast<int>(value));
                         }
                     }
-                    catch (...)
+                    catch (const std::invalid_argument &)
+                    {
+                        // Ignore malformed token.
+                    }
+                    catch (const std::out_of_range &)
                     {
                         // Ignore malformed token.
                     }
@@ -420,6 +488,31 @@ namespace gtl
                                      const std::string &content,
                                      std::string &error)
         {
+            const fs::path parent = targetPath.parent_path();
+            if (!parent.empty())
+            {
+                fs::path symlinkPath;
+                if (existingPathContainsSymlink(parent, symlinkPath))
+                {
+                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
+                    return false;
+                }
+
+                std::error_code dirError;
+                fs::create_directories(parent, dirError);
+                if (dirError)
+                {
+                    error = "Error creating directory '" + parent.string() + "': " + dirError.message();
+                    return false;
+                }
+
+                if (existingPathContainsSymlink(parent, symlinkPath))
+                {
+                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
+                    return false;
+                }
+            }
+
             std::error_code statusError;
             const auto targetStatus = fs::symlink_status(targetPath, statusError);
             if (!statusError && fs::exists(targetStatus) && fs::is_symlink(targetStatus))
@@ -454,7 +547,16 @@ namespace gtl
             fs::rename(tempPath, targetPath, renameError);
             if (!renameError)
             {
-                return true;
+                return setOwnerOnlyPermissions(targetPath, error);
+            }
+
+            std::error_code secondStatusError;
+            const auto secondStatus = fs::symlink_status(targetPath, secondStatusError);
+            if (!secondStatusError && fs::exists(secondStatus) && fs::is_symlink(secondStatus))
+            {
+                fs::remove(tempPath);
+                error = "Refusing to replace symlinked target after rename retry: '" + targetPath.string() + "'.";
+                return false;
             }
 
             std::error_code removeError;
@@ -463,7 +565,7 @@ namespace gtl
             fs::rename(tempPath, targetPath, secondRenameError);
             if (!secondRenameError)
             {
-                return true;
+                return setOwnerOnlyPermissions(targetPath, error);
             }
 
             fs::remove(tempPath);
@@ -686,6 +788,10 @@ namespace gtl
                 std::cout << "Quiet mode: " << (quietMode ? "ON" : "OFF") << " (set DUSKULL_QUIET=1 to enable)\n";
                 std::cout << "Raw OCR logging: " << (debugOcrLogging ? "ON" : "OFF")
                           << " (set DUSKULL_DEBUG_OCR=1 to enable)\n";
+                if (debugOcrLogging)
+                {
+                    std::cout << "Warning: raw OCR logging can expose sensitive text in terminal logs.\n";
+                }
                 if (!expectedAppOwner.empty())
                 {
                     std::cout << "Click safety: enforcing frontmost app owner '" << expectedAppOwner << "'.\n";
@@ -739,7 +845,7 @@ namespace gtl
                     std::cout << "\nScanned first row: ";
                     for (const auto &text : detectedTexts)
                     {
-                        std::cout << "[" << text << "] ";
+                        std::cout << "[" << sanitizeForTerminal(text) << "] ";
                     }
                     std::cout << "\n";
                 }

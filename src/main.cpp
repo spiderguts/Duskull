@@ -21,7 +21,7 @@ namespace
         Buy = 1,
     };
 
-    constexpr std::string_view kVersion = "Alpha v0.1.14";
+    constexpr std::string_view kVersion = "Alpha v0.2.0";
     const std::array<console::MenuItem, 2> kMainMenuItems{{
         {Buy, "GTL Buying"},
         {Exit, "Exit"},

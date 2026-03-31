@@ -25,6 +25,7 @@ namespace gtl::csv
         constexpr std::uintmax_t kMaxCsvFileBytes = 1024 * 1024;
         constexpr std::size_t kMaxCsvLineLength = 4096;
         constexpr std::size_t kMaxCsvRules = 5000;
+        constexpr std::size_t kMaxCsvMemoryBytes = 10 * 1024 * 1024;
 
         constexpr std::size_t kPokemonColumnIndex = 0;
         constexpr std::size_t kNatureColumnIndex = 1;
@@ -52,6 +53,18 @@ namespace gtl::csv
                                               { return std::isspace(ch); })
                                  .base();
             return (start < end) ? std::string(start, end) : std::string();
+        }
+
+        std::string sanitizeForTerminal(std::string_view text)
+        {
+            std::string out;
+            out.reserve(text.size());
+            for (const unsigned char ch : text)
+            {
+                const bool keep = ch == '\t' || ch == '\n' || (ch >= 32 && ch != 127);
+                out.push_back(keep ? static_cast<char>(ch) : '?');
+            }
+            return out;
         }
 
         std::optional<long long> parseWholeNumber(std::string_view text)
@@ -82,7 +95,11 @@ namespace gtl::csv
             {
                 return std::stoll(digitsOnly);
             }
-            catch (...)
+            catch (const std::invalid_argument &)
+            {
+                return std::nullopt;
+            }
+            catch (const std::out_of_range &)
             {
                 return std::nullopt;
             }
@@ -152,6 +169,7 @@ namespace gtl::csv
 
             std::string line;
             bool skippedHeader = false;
+            std::size_t totalRowBytes = 0;
 
             while (std::getline(csvFile, line))
             {
@@ -175,12 +193,24 @@ namespace gtl::csv
                 const auto fields = parseCsvLine(line);
                 if (fields.size() != kExpectedCsvColumnCount)
                 {
-                    console::printError("Skipping malformed CSV row: " + line);
+                    console::printError("Skipping malformed CSV row: " + sanitizeForTerminal(line));
                     continue;
                 }
 
                 if (isMeaningfulCsvRow(fields))
                 {
+                    totalRowBytes += line.size();
+                    for (const auto &field : fields)
+                    {
+                        totalRowBytes += field.size();
+                    }
+
+                    if (totalRowBytes > kMaxCsvMemoryBytes)
+                    {
+                        fatalError = "CSV content exceeds in-memory safety limit (10MB).";
+                        return {};
+                    }
+
                     rows.push_back(CsvRecord{line, fields});
                     if (rows.size() >= kMaxCsvRules)
                     {
@@ -295,7 +325,7 @@ namespace gtl::csv
             std::string validationError;
             if (!buildCsvMatchRule(row, rule, validationError))
             {
-                console::printError("Skipping invalid CSV row: '" + row.rawLine + "' (" + validationError + ").");
+                console::printError("Skipping invalid CSV row: '" + sanitizeForTerminal(row.rawLine) + "' (" + validationError + ").");
                 continue;
             }
 

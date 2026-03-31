@@ -460,7 +460,16 @@ namespace macos_native
             return result;
         }
 
-        HGDIOBJ old     = SelectObject(memDC, hBitmap);
+        HGDIOBJ old = SelectObject(memDC, hBitmap);
+        if (old == nullptr || old == HGDI_ERROR)
+        {
+            DeleteObject(hBitmap);
+            DeleteDC(memDC);
+            ReleaseDC(nullptr, screenDC);
+            error = "SelectObject failed before capture.";
+            return result;
+        }
+
         const BOOL blitOk = BitBlt(memDC, 0, 0, sw, sh, screenDC, sx, sy, SRCCOPY);
         SelectObject(memDC, old);
         DeleteDC(memDC);
@@ -491,9 +500,10 @@ namespace macos_native
         ReleaseDC(nullptr, dcDib);
         DeleteObject(hBitmap);
 
-        if (lines == 0)
+        if (lines <= 0)
         {
-            error = "GetDIBits failed to read pixel data.";
+            const DWORD lastError = GetLastError();
+            error = "GetDIBits failed to read pixel data (code " + std::to_string(lastError) + ").";
             return result;
         }
 

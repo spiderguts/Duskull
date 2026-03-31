@@ -93,7 +93,11 @@ namespace gtl::match
             {
                 return std::stoll(digitsOnly);
             }
-            catch (...)
+            catch (const std::invalid_argument &)
+            {
+                return std::nullopt;
+            }
+            catch (const std::out_of_range &)
             {
                 return std::nullopt;
             }

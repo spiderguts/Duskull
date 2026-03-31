@@ -1,0 +1,197 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build macOS binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src
+          clang++ -std=c++17 -O2 -fcolor-diagnostics -fansi-escape-codes -fobjc-arc \
+            main.cpp gtl.cpp gtl_csv.cpp gtl_match.cpp gtl_calibration.cpp macos_native.mm \
+            -framework Foundation -framework Vision -framework ApplicationServices \
+            -framework CoreGraphics -framework ScreenCaptureKit \
+            -o ../Duskull
+          strip ../Duskull
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Privacy scan binary
+        shell: bash
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPO: ${{ github.repository }}
+          GH_WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+
+          binary = Path("Duskull")
+          data = binary.read_bytes()
+          low = data.lower()
+
+          needles = {
+            b"/users/",
+            b"/home/",
+            b"\\users\\",
+            b".dsym",
+            b".pdb",
+          }
+
+          actor = os.environ.get("GH_ACTOR", "").strip().lower()
+          repo = os.environ.get("GH_REPO", "").strip().lower()
+          workspace = os.environ.get("GH_WORKSPACE", "").strip().lower()
+
+          for value in (actor, repo, workspace):
+              if value:
+                needles.add(value.encode("utf-8", errors="ignore"))
+
+          found = sorted(s.decode("utf-8", errors="ignore") for s in needles if s and s in low)
+          if found:
+              print("Privacy scan failed. Found suspicious strings:")
+              for item in found:
+                  print(f" - {item}")
+              sys.exit(1)
+
+          print("Privacy scan passed.")
+          PY
+
+      - name: Package macOS artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -j Duskull-macos-arm64.zip Duskull
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Duskull-macos-arm64
+          path: Duskull-macos-arm64.zip
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build Windows binary
+        shell: cmd
+        run: |
+          cd src
+          cl.exe /std:c++17 /EHsc /permissive- /nologo /O2 /W3 /DNDEBUG main.cpp gtl.cpp gtl_csv.cpp gtl_match.cpp gtl_calibration.cpp windows_platform.cpp /link user32.lib gdi32.lib psapi.lib windowsapp.lib /DEBUG:NONE /INCREMENTAL:NO /OPT:REF /OPT:ICF /out:..\Duskull.exe
+
+      - name: Strip Windows binary (best effort)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          if (Get-Command llvm-strip -ErrorAction SilentlyContinue) {
+            llvm-strip .\Duskull.exe
+          } else {
+            Write-Host "llvm-strip not found; continuing with /DEBUG:NONE release output"
+          }
+
+      - name: Privacy scan binary
+        shell: powershell
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPO: ${{ github.repository }}
+          GH_WORKSPACE: ${{ github.workspace }}
+        run: |
+          $code = @'
+          from pathlib import Path
+          import os
+          import sys
+
+          binary = Path("Duskull.exe")
+          data = binary.read_bytes()
+          low = data.lower()
+
+          needles = {
+            b"/users/",
+            b"/home/",
+            b"\\users\\",
+            b".dsym",
+            b".pdb",
+          }
+
+          actor = os.environ.get("GH_ACTOR", "").strip().lower()
+          repo = os.environ.get("GH_REPO", "").strip().lower()
+          workspace = os.environ.get("GH_WORKSPACE", "").strip().lower()
+
+          for value in (actor, repo, workspace):
+              if value:
+                needles.add(value.encode("utf-8", errors="ignore"))
+
+          found = sorted(s.decode("utf-8", errors="ignore") for s in needles if s and s in low)
+          if found:
+              print("Privacy scan failed. Found suspicious strings:")
+              for item in found:
+                  print(f" - {item}")
+              sys.exit(1)
+
+          print("Privacy scan passed.")
+          '@
+
+          python -c $code
+
+      - name: Package Windows artifact
+        shell: powershell
+        run: |
+          Compress-Archive -Path .\Duskull.exe -DestinationPath .\Duskull-windows-x64.zip -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Duskull-windows-x64
+          path: Duskull-windows-x64.zip
+
+  publish-release:
+    name: Publish release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/**/Duskull-macos-arm64.zip
+            release-assets/**/Duskull-windows-x64.zip
