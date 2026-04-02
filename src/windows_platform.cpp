@@ -110,20 +110,20 @@ namespace
         {
             macos_native::HumanInputProfile q;
             const char *raw = std::getenv("DUSKULL_INPUT_SPEED");
-            const std::string speed = raw ? raw : "normal";
+            const std::string speed = raw ? raw : "fast_human";
             if (speed == "fast")
             {
-                q.moveStepDelayMinMs = 3;
-                q.moveStepDelayMaxMs = 10;
-                q.clickDwellMinMs    = 40;
-                q.clickDwellMaxMs    = 120;
-                q.clickHoldMinMs     = 20;
-                q.clickHoldMaxMs     = 60;
-                q.keyInterDelayMinMs = 30;
-                q.keyInterDelayMaxMs = 100;
-                q.keyHoldMinMs       = 15;
-                q.keyHoldMaxMs       = 50;
-                q.pathJitterPx       = 0.4;
+                q.moveStepDelayMinMs = 2;
+                q.moveStepDelayMaxMs = 8;
+                q.clickDwellMinMs    = 24;
+                q.clickDwellMaxMs    = 75;
+                q.clickHoldMinMs     = 12;
+                q.clickHoldMaxMs     = 35;
+                q.keyInterDelayMinMs = 16;
+                q.keyInterDelayMaxMs = 60;
+                q.keyHoldMinMs       = 8;
+                q.keyHoldMaxMs       = 28;
+                q.pathJitterPx       = 0.35;
             }
             else if (speed == "cautious")
             {
@@ -619,8 +619,8 @@ namespace macos_native
         }
 
         const auto  &prof    = defaultProfile();
-        const double baseDur = 85.0 + 20.0 * std::pow(dist, 0.58);
-        const double dur     = std::clamp(baseDur * randomDouble(0.90, 1.18), 120.0, 950.0);
+        const double baseDur = 58.0 + 14.0 * std::pow(dist, 0.54);
+        const double dur     = std::clamp(baseDur * randomDouble(0.92, 1.16), 85.0, 680.0);
         const double avgStep = (static_cast<double>(prof.moveStepDelayMinMs) +
                                 static_cast<double>(prof.moveStepDelayMaxMs)) * 0.5;
         const std::size_t n  = static_cast<std::size_t>(

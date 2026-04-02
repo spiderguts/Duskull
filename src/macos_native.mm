@@ -61,21 +61,21 @@ namespace
             macos_native::HumanInputProfile p;
 
             const char *raw = std::getenv("DUSKULL_INPUT_SPEED");
-            const std::string speed = (raw != nullptr) ? raw : "normal";
+            const std::string speed = (raw != nullptr) ? raw : "fast_human";
 
             if (speed == "fast")
             {
-                p.moveStepDelayMinMs  = 3;
-                p.moveStepDelayMaxMs  = 10;
-                p.clickDwellMinMs     = 40;
-                p.clickDwellMaxMs     = 120;
-                p.clickHoldMinMs      = 20;
-                p.clickHoldMaxMs      = 60;
-                p.keyInterDelayMinMs  = 30;
-                p.keyInterDelayMaxMs  = 100;
-                p.keyHoldMinMs        = 15;
-                p.keyHoldMaxMs        = 50;
-                p.pathJitterPx        = 0.4;
+                p.moveStepDelayMinMs  = 2;
+                p.moveStepDelayMaxMs  = 8;
+                p.clickDwellMinMs     = 24;
+                p.clickDwellMaxMs     = 75;
+                p.clickHoldMinMs      = 12;
+                p.clickHoldMaxMs      = 35;
+                p.keyInterDelayMinMs  = 16;
+                p.keyInterDelayMaxMs  = 60;
+                p.keyHoldMinMs        = 8;
+                p.keyHoldMaxMs        = 28;
+                p.pathJitterPx        = 0.35;
             }
             else if (speed == "cautious")
             {
@@ -684,8 +684,8 @@ namespace macos_native
         }
 
         const auto &profile = defaultHumanInputProfile();
-        const double baseDurationMs = 85.0 + 20.0 * std::pow(distance, 0.58);
-        const double durationMs = std::clamp(baseDurationMs * randomDouble(0.90, 1.18), 120.0, 950.0);
+        const double baseDurationMs = 58.0 + 14.0 * std::pow(distance, 0.54);
+        const double durationMs = std::clamp(baseDurationMs * randomDouble(0.92, 1.16), 85.0, 680.0);
         const double avgStepDelayMs = (static_cast<double>(profile.moveStepDelayMinMs) +
                                        static_cast<double>(profile.moveStepDelayMaxMs)) *
                                       0.5;

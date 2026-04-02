@@ -9,8 +9,10 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace console
 {
@@ -21,7 +23,11 @@ namespace console
     };
 
     inline constexpr std::string_view kGreen = "\033[32m";
+    inline constexpr std::string_view kYellow = "\033[33m";
+    inline constexpr std::string_view kOrange = "\033[38;5;208m";
+    inline constexpr std::string_view kBlue = "\033[94m";
     inline constexpr std::string_view kRed = "\033[31m";
+    inline constexpr std::string_view kPurple = "\033[35m";
     inline constexpr std::string_view kReset = "\033[0m";
 
     inline void printColored(std::string_view message, std::string_view color)
@@ -63,24 +69,90 @@ namespace console
     }
 
     template <typename Range>
-    void printMenu(const Range &items, std::string_view prompt)
+    std::string buildChoiceLabel(const Range &items)
     {
-        std::cout << '\n';
+        if (items.begin() == items.end())
+        {
+            return std::string();
+        }
+
+        std::vector<int> values;
+        values.reserve(static_cast<std::size_t>(std::distance(items.begin(), items.end())));
+        for (const auto &item : items)
+        {
+            values.push_back(item.value);
+        }
+
+        std::sort(values.begin(), values.end());
+        values.erase(std::unique(values.begin(), values.end()), values.end());
+
+        bool contiguous = true;
+        auto it = values.begin();
+        int minValue = *it;
+        int maxValue = *it;
+        int previous = *it;
+        ++it;
+
+        for (; it != values.end(); ++it)
+        {
+            minValue = std::min(minValue, *it);
+            maxValue = std::max(maxValue, *it);
+            if (*it != previous + 1)
+            {
+                contiguous = false;
+            }
+            previous = *it;
+        }
+
+        if (contiguous)
+        {
+            return std::to_string(minValue) + "-" + std::to_string(maxValue);
+        }
+
+        std::ostringstream choiceList;
+        bool first = true;
+        for (const int value : values)
+        {
+            if (!first)
+            {
+                choiceList << ", ";
+            }
+            choiceList << value;
+            first = false;
+        }
+
+        return choiceList.str();
+    }
+
+    template <typename Range>
+    void printMenu(const Range &items,
+                   std::string_view menuTitle,
+                   std::string_view menuContext)
+    {
+        std::cout << '\n'
+                  << kPurple << "~~~" << menuTitle << "~~~" << kReset << '\n';
+
+        if (!menuContext.empty())
+        {
+            std::cout << menuContext << '\n';
+        }
+
         for (const auto &item : items)
         {
             std::cout << '[' << item.value << "] " << item.label << '\n';
         }
 
         std::cout << '\n'
-                  << prompt << '\n';
+                  << "Choose " << buildChoiceLabel(items) << ": ";
     }
 
     template <typename Range>
     std::optional<int> promptMenuChoice(const Range &items,
-                                        std::string_view prompt,
+                                        std::string_view menuTitle,
+                                        std::string_view menuContext,
                                         std::string_view invalidChoiceMessage)
     {
-        printMenu(items, prompt);
+        printMenu(items, menuTitle, menuContext);
 
         const auto selection = readMenuChoice();
         if (!selection)

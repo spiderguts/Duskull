@@ -7,15 +7,14 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdint>
 #include <fstream>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "console.h"
+#include "duskull_util.h"
 
 namespace gtl::csv
 {
@@ -45,66 +44,6 @@ namespace gtl::csv
             std::vector<std::string> fields;
         };
 
-        std::string trim(const std::string &in)
-        {
-            const auto start = std::find_if_not(in.begin(), in.end(), [](unsigned char ch)
-                                                { return std::isspace(ch); });
-            const auto end = std::find_if_not(in.rbegin(), in.rend(), [](unsigned char ch)
-                                              { return std::isspace(ch); })
-                                 .base();
-            return (start < end) ? std::string(start, end) : std::string();
-        }
-
-        std::string sanitizeForTerminal(std::string_view text)
-        {
-            std::string out;
-            out.reserve(text.size());
-            for (const unsigned char ch : text)
-            {
-                const bool keep = ch == '\t' || ch == '\n' || (ch >= 32 && ch != 127);
-                out.push_back(keep ? static_cast<char>(ch) : '?');
-            }
-            return out;
-        }
-
-        std::optional<long long> parseWholeNumber(std::string_view text)
-        {
-            std::string digitsOnly;
-            digitsOnly.reserve(text.size());
-
-            for (const char ch : text)
-            {
-                if (std::isdigit(static_cast<unsigned char>(ch)))
-                {
-                    digitsOnly.push_back(ch);
-                    continue;
-                }
-
-                if (ch != ',')
-                {
-                    return std::nullopt;
-                }
-            }
-
-            if (digitsOnly.empty())
-            {
-                return std::nullopt;
-            }
-
-            try
-            {
-                return std::stoll(digitsOnly);
-            }
-            catch (const std::invalid_argument &)
-            {
-                return std::nullopt;
-            }
-            catch (const std::out_of_range &)
-            {
-                return std::nullopt;
-            }
-        }
-
         std::vector<std::string> parseCsvLine(const std::string &line)
         {
             std::vector<std::string> fields;
@@ -129,7 +68,7 @@ namespace gtl::csv
                 }
                 else if (ch == ',' && !inQuotes)
                 {
-                    fields.push_back(trim(currentField));
+                    fields.push_back(duskull::util::trim(currentField));
                     currentField.clear();
                 }
                 else
@@ -138,14 +77,14 @@ namespace gtl::csv
                 }
             }
 
-            fields.push_back(trim(currentField));
+            fields.push_back(duskull::util::trim(currentField));
             return fields;
         }
 
         bool isMeaningfulCsvRow(const std::vector<std::string> &fields)
         {
             return std::any_of(fields.begin(), fields.end(), [](const std::string &field)
-                               { return !trim(field).empty(); });
+                               { return !duskull::util::trim(field).empty(); });
         }
 
         std::vector<CsvRecord> loadCsvRows(const std::filesystem::path &csvPath, std::string &fatalError)
@@ -179,7 +118,7 @@ namespace gtl::csv
                     continue;
                 }
 
-                if (trim(line).empty())
+                if (duskull::util::trim(line).empty())
                 {
                     continue;
                 }
@@ -193,7 +132,7 @@ namespace gtl::csv
                 const auto fields = parseCsvLine(line);
                 if (fields.size() != kExpectedCsvColumnCount)
                 {
-                    console::printError("Skipping malformed CSV row: " + sanitizeForTerminal(line));
+                    console::printError("Skipping malformed CSV row: " + duskull::util::sanitizeForTerminal(line));
                     continue;
                 }
 
@@ -230,7 +169,7 @@ namespace gtl::csv
                 return std::string();
             }
 
-            return trim(record.fields[index]);
+            return duskull::util::trim(record.fields[index]);
         }
 
         bool buildCsvMatchRule(const CsvRecord &record, CsvMatchRule &rule, std::string &error)
@@ -254,7 +193,7 @@ namespace gtl::csv
                 return false;
             }
 
-            const auto maxBuyValue = parseWholeNumber(maxBuy);
+            const auto maxBuyValue = duskull::util::parseWholeNumber(maxBuy);
             if (!maxBuyValue)
             {
                 error = "'MaxBuy' must be a whole number (digits with optional commas)";
@@ -295,7 +234,7 @@ namespace gtl::csv
 
             if (!minIv.empty())
             {
-                const auto minIvValue = parseWholeNumber(minIv);
+                const auto minIvValue = duskull::util::parseWholeNumber(minIv);
                 if (!minIvValue || *minIvValue > 186)
                 {
                     error = "'MinIV' must be a whole number between 0 and 186";
@@ -325,7 +264,7 @@ namespace gtl::csv
             std::string validationError;
             if (!buildCsvMatchRule(row, rule, validationError))
             {
-                console::printError("Skipping invalid CSV row: '" + sanitizeForTerminal(row.rawLine) + "' (" + validationError + ").");
+                console::printError("Skipping invalid CSV row: '" + duskull::util::sanitizeForTerminal(row.rawLine) + "' (" + validationError + ").");
                 continue;
             }
 

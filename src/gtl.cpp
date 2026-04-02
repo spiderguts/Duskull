@@ -7,19 +7,22 @@
 #include <array>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <optional>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "console.h"
+#include "duskull_util.h"
 #include "gtl.h"
 #include "gtl_calibration.h"
 #include "gtl_csv.h"
@@ -32,108 +35,38 @@ namespace gtl
     {
         namespace fs = std::filesystem;
 
-        enum MenuAction
+        enum MainMenuAction
         {
-            Exit = 0,
-            CreateCsv = 1,
-            SelectCsv = 2,
+            Start = 1,
+            Settings = 2,
+            Back = 0,
+        };
+
+        enum SettingsMenuAction
+        {
+            SelectCsv = 1,
+            CreateCsv = 2,
             RecalibrateCoordinates = 3,
+            SettingsBack = 0,
         };
 
         constexpr std::string_view kCsvHeader = "Pokemon,Nature,HP,Atk,Def,SpAtk,SpDef,Spd,Item,MaxBuy,MinIV\n";
         constexpr std::string_view kCsvDirectory = "CSV_Files";
+        constexpr std::string_view kSelectedCsvFile = "selected_csv.cfg";
         constexpr std::string_view kIllegalChars = " \\/:*?\"<>|";
-        constexpr std::string_view kAnsiGreen = "\033[32m";
-        constexpr std::string_view kAnsiYellow = "\033[33m";
-        constexpr std::string_view kAnsiOrange = "\033[38;5;208m";
-        constexpr std::string_view kAnsiBlue = "\033[94m";
-        constexpr std::string_view kAnsiReset = "\033[0m";
 
-        const std::array<console::MenuItem, 4> kGtlMenuItems{{
-            {CreateCsv, "Create CSV file"},
-            {SelectCsv, "Select CSV file"},
+        const std::array<console::MenuItem, 3> kGtlMenuItems{{
+            {Start, "Start"},
+            {Settings, "Settings"},
+            {Back, "Back"},
+        }};
+
+        const std::array<console::MenuItem, 4> kSettingsMenuItems{{
+            {SelectCsv, "Select CSV"},
+            {CreateCsv, "Create CSV"},
             {RecalibrateCoordinates, "Recalibrate Coordinates"},
-            {Exit, "Back to Main Menu"},
+            {SettingsBack, "Back"},
         }};
-
-        const std::array<console::MenuItem, 2> kStartMenuItems{{
-            {1, "Start"},
-            {0, "Back"},
-        }};
-
-        std::string trim(const std::string &in)
-        {
-            const auto start = std::find_if_not(in.begin(), in.end(), [](unsigned char ch)
-                                                { return std::isspace(ch); });
-            const auto end = std::find_if_not(in.rbegin(), in.rend(), [](unsigned char ch)
-                                              { return std::isspace(ch); })
-                                 .base();
-            return (start < end) ? std::string(start, end) : std::string();
-        }
-
-        std::string sanitizeForTerminal(std::string_view text)
-        {
-            std::string out;
-            out.reserve(text.size());
-            for (const unsigned char ch : text)
-            {
-                const bool keep = ch == '\t' || ch == '\n' || (ch >= 32 && ch != 127);
-                out.push_back(keep ? static_cast<char>(ch) : '?');
-            }
-            return out;
-        }
-
-        bool existingPathContainsSymlink(const fs::path &path, fs::path &symlinkPath)
-        {
-            if (path.empty())
-            {
-                return false;
-            }
-
-            const auto normalized = path.lexically_normal();
-            fs::path current = normalized.root_path();
-
-            for (const auto &part : normalized.relative_path())
-            {
-                current /= part;
-
-                std::error_code statusError;
-                const auto status = fs::symlink_status(current, statusError);
-                if (statusError)
-                {
-                    continue;
-                }
-
-                if (!fs::exists(status))
-                {
-                    break;
-                }
-
-                if (fs::is_symlink(status))
-                {
-                    symlinkPath = current;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        bool setOwnerOnlyPermissions(const fs::path &targetPath, std::string &error)
-        {
-            std::error_code permissionsError;
-            fs::permissions(targetPath,
-                            fs::perms::owner_read | fs::perms::owner_write,
-                            fs::perm_options::replace,
-                            permissionsError);
-            if (permissionsError)
-            {
-                error = "Error setting secure permissions on '" + targetPath.string() + "': " + permissionsError.message();
-                return false;
-            }
-
-            return true;
-        }
 
         bool isValidFileName(std::string_view name)
         {
@@ -180,19 +113,19 @@ namespace gtl
             }
 
             const double ratio = static_cast<double>(listingPrice) / static_cast<double>(maxBuy);
-            std::string_view color = kAnsiGreen;
+            std::string_view color = console::kGreen;
 
-            // Near max-buy is highest urgency (red), mid-range is caution (yellow), low is good (green).
+            // Near max-buy is high (orange), mid-range is medium (yellow), low is good (green).
             if (ratio >= 0.90)
             {
-                color = kAnsiOrange;
+                color = console::kOrange;
             }
             else if (ratio >= 0.70)
             {
-                color = kAnsiYellow;
+                color = console::kYellow;
             }
 
-            return std::string(color) + "$" + commaFormat(listingPrice) + std::string(kAnsiReset);
+            return std::string(color) + "$" + commaFormat(listingPrice) + std::string(console::kReset);
         }
 
         std::string colorizeExactThirtyOneTokens(std::string_view text)
@@ -219,9 +152,9 @@ namespace gtl
                     continue;
                 }
 
-                out.append(kAnsiGreen);
+                out.append(console::kGreen);
                 out.append("31");
-                out.append(kAnsiReset);
+                out.append(console::kReset);
                 i += 2;
             }
 
@@ -337,7 +270,7 @@ namespace gtl
                 out << kIvLabels[i] << "=";
                 if (ivData.ivs[i] == 31)
                 {
-                    out << kAnsiGreen << ivData.ivs[i] << kAnsiReset;
+                    out << console::kGreen << ivData.ivs[i] << console::kReset;
                 }
                 else
                 {
@@ -431,7 +364,7 @@ namespace gtl
 
                 if (ivData.ivs[i] == 31)
                 {
-                    out << kAnsiGreen << ivData.ivs[i] << kAnsiReset;
+                    out << console::kGreen << ivData.ivs[i] << console::kReset;
                 }
                 else
                 {
@@ -449,8 +382,8 @@ namespace gtl
             }
 
             std::ostringstream out;
-            out << kAnsiYellow << "Warning: detected " << detectedCount
-                << "/6 IV values before price; check OCR crop/order." << kAnsiReset;
+            out << console::kYellow << "Warning: detected " << detectedCount
+                << "/6 IV values before price; check OCR crop/order." << console::kReset;
             return out.str();
         }
 
@@ -461,7 +394,7 @@ namespace gtl
 
             for (const auto &text : detectedTexts)
             {
-                const std::string cleaned = trim(text);
+                const std::string cleaned = duskull::util::trim(text);
                 if (cleaned.empty())
                 {
                     continue;
@@ -482,95 +415,6 @@ namespace gtl
             }
 
             return out.str();
-        }
-
-        bool writeTextFileAtomically(const fs::path &targetPath,
-                                     const std::string &content,
-                                     std::string &error)
-        {
-            const fs::path parent = targetPath.parent_path();
-            if (!parent.empty())
-            {
-                fs::path symlinkPath;
-                if (existingPathContainsSymlink(parent, symlinkPath))
-                {
-                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
-                    return false;
-                }
-
-                std::error_code dirError;
-                fs::create_directories(parent, dirError);
-                if (dirError)
-                {
-                    error = "Error creating directory '" + parent.string() + "': " + dirError.message();
-                    return false;
-                }
-
-                if (existingPathContainsSymlink(parent, symlinkPath))
-                {
-                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
-                    return false;
-                }
-            }
-
-            std::error_code statusError;
-            const auto targetStatus = fs::symlink_status(targetPath, statusError);
-            if (!statusError && fs::exists(targetStatus) && fs::is_symlink(targetStatus))
-            {
-                error = "Refusing to write through symlinked target: '" + targetPath.string() + "'.";
-                return false;
-            }
-
-            std::random_device rd;
-            std::stringstream suffix;
-            suffix << ".tmp." << std::hex << rd();
-            const fs::path tempPath = targetPath.string() + suffix.str();
-
-            {
-                std::ofstream tempFile(tempPath, std::ios::out | std::ios::trunc);
-                if (!tempFile)
-                {
-                    error = "Error creating temp file '" + tempPath.string() + "'.";
-                    return false;
-                }
-
-                tempFile << content;
-                if (!tempFile.good())
-                {
-                    fs::remove(tempPath);
-                    error = "Error writing temp file '" + tempPath.string() + "'.";
-                    return false;
-                }
-            }
-
-            std::error_code renameError;
-            fs::rename(tempPath, targetPath, renameError);
-            if (!renameError)
-            {
-                return setOwnerOnlyPermissions(targetPath, error);
-            }
-
-            std::error_code secondStatusError;
-            const auto secondStatus = fs::symlink_status(targetPath, secondStatusError);
-            if (!secondStatusError && fs::exists(secondStatus) && fs::is_symlink(secondStatus))
-            {
-                fs::remove(tempPath);
-                error = "Refusing to replace symlinked target after rename retry: '" + targetPath.string() + "'.";
-                return false;
-            }
-
-            std::error_code removeError;
-            fs::remove(targetPath, removeError);
-            std::error_code secondRenameError;
-            fs::rename(tempPath, targetPath, secondRenameError);
-            if (!secondRenameError)
-            {
-                return setOwnerOnlyPermissions(targetPath, error);
-            }
-
-            fs::remove(tempPath);
-            error = "Error replacing file '" + targetPath.string() + "': " + secondRenameError.message();
-            return false;
         }
 
         class ScopedAbortListener
@@ -610,7 +454,130 @@ namespace gtl
                 return std::string();
             }
 
-            return trim(raw);
+            return duskull::util::trim(raw);
+        }
+
+        std::mt19937_64 &sniperRng()
+        {
+            static thread_local std::mt19937_64 generator([]()
+                                                          {
+                std::random_device rd;
+                const auto now = static_cast<std::uint64_t>(
+                    std::chrono::high_resolution_clock::now().time_since_epoch().count());
+                return static_cast<std::uint64_t>(rd()) ^
+                       (static_cast<std::uint64_t>(rd()) << 1ULL) ^
+                       (now << 7ULL); }());
+            return generator;
+        }
+
+        int nextRefreshDelayMs()
+        {
+            // Keep auto-refresh cadence human-like around 2s with mild jitter.
+            std::uniform_int_distribution<int> delayMs(1850, 2350);
+            return delayMs(sniperRng());
+        }
+
+        std::pair<long long, long long> jitterClickTarget(const calibration::ClickBounds &bounds,
+                                                          const macos_native::DisplayMetrics &display,
+                                                          std::string_view regionTag)
+        {
+            const long long maxXDisplay = std::max(0LL, display.widthPoints - 1);
+            const long long maxYDisplay = std::max(0LL, display.heightPoints - 1);
+
+            const auto clampToVisibleBounds = [&](long long x, long long y)
+            {
+                const long long clampedX = std::clamp(x, bounds.minX, bounds.maxX);
+                const long long clampedY = std::clamp(y, bounds.minY, bounds.maxY);
+                return std::make_pair(std::clamp(clampedX, 0LL, maxXDisplay),
+                                      std::clamp(clampedY, 0LL, maxYDisplay));
+            };
+
+            const auto randomInRegion = [&]()
+            {
+                // Draw uniformly then nudge ~33% toward the region center — loose
+                // center preference without locking tightly to the middle.
+                std::uniform_int_distribution<long long> distX(bounds.minX, bounds.maxX);
+                std::uniform_int_distribution<long long> distY(bounds.minY, bounds.maxY);
+                const long long midX = (bounds.minX + bounds.maxX) / 2;
+                const long long midY = (bounds.minY + bounds.maxY) / 2;
+                const long long rawX = distX(sniperRng());
+                const long long rawY = distY(sniperRng());
+                const long long x = rawX + (midX - rawX) / 3;
+                const long long y = rawY + (midY - rawY) / 3;
+                return clampToVisibleBounds(x, y);
+            };
+
+            struct RegionAnchor
+            {
+                long long x = 0;
+                long long y = 0;
+                bool initialized = false;
+            };
+
+            static std::unordered_map<std::string, RegionAnchor> anchorsByRegion;
+            static bool hasLastClick = false;
+            static long long lastClickX = 0;
+            static long long lastClickY = 0;
+            static std::string lastRegionTag;
+
+            if (bounds.minX == bounds.maxX && bounds.minY == bounds.maxY)
+            {
+                const auto fixedPoint = clampToVisibleBounds(bounds.minX, bounds.minY);
+                hasLastClick = true;
+                lastClickX = fixedPoint.first;
+                lastClickY = fixedPoint.second;
+                return fixedPoint;
+            }
+
+            RegionAnchor &anchor = anchorsByRegion[std::string(regionTag)];
+
+            constexpr double kLongHopThresholdPx = 80.0;
+            // Refresh clicks use 1-in-11 micro-drift during repeated clicks in the same region.
+            const int rareJitterOdds = 11;
+            constexpr int kRareJitterMaxPx = 2;
+
+            const bool isConsecutiveSameRegion = hasLastClick && (lastRegionTag == regionTag);
+            bool shouldResampleAnchor = !anchor.initialized || !isConsecutiveSameRegion;
+            if (hasLastClick)
+            {
+                const double centerX = (static_cast<double>(bounds.minX) + static_cast<double>(bounds.maxX)) * 0.5;
+                const double centerY = (static_cast<double>(bounds.minY) + static_cast<double>(bounds.maxY)) * 0.5;
+                const double hopDistance = std::hypot(static_cast<double>(lastClickX) - centerX,
+                                                      static_cast<double>(lastClickY) - centerY);
+                if (hopDistance >= kLongHopThresholdPx)
+                {
+                    shouldResampleAnchor = true;
+                }
+            }
+
+            if (shouldResampleAnchor)
+            {
+                const auto sampled = randomInRegion();
+                anchor.x = sampled.first;
+                anchor.y = sampled.second;
+                anchor.initialized = true;
+            }
+
+            // Stay exactly on the anchor unless rare same-region jitter fires.
+            long long jitteredX = anchor.x;
+            long long jitteredY = anchor.y;
+            if (isConsecutiveSameRegion)
+            {
+                std::uniform_int_distribution<int> oddsRoll(1, rareJitterOdds);
+                if (oddsRoll(sniperRng()) == 1)
+                {
+                    std::uniform_int_distribution<int> jitterDist(-kRareJitterMaxPx, kRareJitterMaxPx);
+                    jitteredX += static_cast<long long>(jitterDist(sniperRng()));
+                    jitteredY += static_cast<long long>(jitterDist(sniperRng()));
+                }
+            }
+            const auto finalPoint = clampToVisibleBounds(jitteredX, jitteredY);
+
+            hasLastClick = true;
+            lastRegionTag = std::string(regionTag);
+            lastClickX = finalPoint.first;
+            lastClickY = finalPoint.second;
+            return finalPoint;
         }
 
         bool frontmostAppMatchesExpected(const std::string &expectedAppOwner,
@@ -697,6 +664,68 @@ namespace gtl
             return items;
         }
 
+        fs::path selectedCsvConfigPath()
+        {
+            return fs::path(kCsvDirectory) / kSelectedCsvFile;
+        }
+
+        std::optional<fs::path> loadPersistedSelectedCsv()
+        {
+            const fs::path selectedPath = selectedCsvConfigPath();
+            if (!fs::exists(selectedPath))
+            {
+                return std::nullopt;
+            }
+
+            std::ifstream selectedFile(selectedPath);
+            if (!selectedFile)
+            {
+                return std::nullopt;
+            }
+
+            std::string selectedCsvName;
+            std::getline(selectedFile, selectedCsvName);
+
+            selectedCsvName = duskull::util::trim(selectedCsvName);
+            if (selectedCsvName.empty())
+            {
+                return std::nullopt;
+            }
+
+            const fs::path csvPath = fs::path(kCsvDirectory) / selectedCsvName;
+            if (!fs::exists(csvPath) || !fs::is_regular_file(csvPath) || csvPath.extension() != ".csv")
+            {
+                return std::nullopt;
+            }
+
+            return csvPath;
+        }
+
+        bool persistSelectedCsv(const fs::path &csvPath)
+        {
+            if (!ensureCsvDirectory())
+            {
+                return false;
+            }
+
+            const fs::path configPath = selectedCsvConfigPath();
+            std::string writeError;
+            return duskull::util::writeTextFileAtomically(configPath,
+                                                          csvPath.filename().string() + "\n",
+                                                          writeError);
+        }
+
+        std::string buildGtlMainContext()
+        {
+            const auto selectedCsv = loadPersistedSelectedCsv();
+            const std::string selectedCsvLabel = selectedCsv
+                                                     ? selectedCsv->filename().string()
+                                                     : std::string("None selected");
+            return "Selected CSV: " + selectedCsvLabel;
+        }
+
+        void createCsv();
+
         void startSniper(const fs::path &csvPath)
         {
             ScopedAbortListener abortListener;
@@ -720,8 +749,9 @@ namespace gtl
                 return;
             }
 
-            console::printSuccess("Loaded " + std::to_string(preparedRules.size()) + " valid CSV rule(s) from '" +
-                                  csvPath.filename().string() + "'.");
+            std::vector<std::string> startupMessages;
+            startupMessages.push_back("Loaded " + std::to_string(preparedRules.size()) +
+                                      " valid CSV rule(s) from '" + csvPath.filename().string() + "'.");
 
             calibration::CoordinateSet coords;
             const fs::path configPath = calibration::defaultCoordinateConfigPath();
@@ -734,7 +764,7 @@ namespace gtl
                 hasCoordinates = calibration::loadCoordinatesFromConfig(configPath, coords, configDiagnostic);
                 if (hasCoordinates)
                 {
-                    console::printSuccess("Loaded saved calibration from '" + configPath.string() + "'.");
+                    startupMessages.push_back("Loaded saved calibration from '" + configPath.string() + "'.");
                 }
                 else
                 {
@@ -749,7 +779,7 @@ namespace gtl
                     }
 
                     calibration::promptCaptureCoordinates(coords);
-                    if (coords.refreshX == 0 || coords.buyX == 0 || coords.cropWidth == 0)
+                    if (!coords.isComplete())
                     {
                         console::printError("Coordinate capture was incomplete. Cannot start sniper.");
                         return;
@@ -777,12 +807,34 @@ namespace gtl
             const bool verboseMode = match::readVerboseMode();
             const std::string expectedAppOwner = readExpectedFrontmostAppOwner();
 
-            console::printSuccess("\nActive sniper started with auto-refresh mode.");
-            std::cout << "Press Escape (global) or Ctrl+C to stop.\n";
+            macos_native::DisplayMetrics display;
+            std::string displayError;
+            if (!macos_native::getPrimaryDisplayMetrics(display, displayError))
+            {
+                display.widthPoints = 20000;
+                display.heightPoints = 20000;
+                if (!quietMode)
+                {
+                    console::printError("Could not read display bounds for click randomization; using fallback bounds: " + displayError);
+                }
+            }
+
+            startupMessages.push_back("Active sniper started with auto-refresh mode.");
+            startupMessages.push_back("Quit: Press Escape (global) or Ctrl+C to stop.");
+
+            std::cout << "\n";
+            for (const auto &message : startupMessages)
+            {
+                std::cout << console::kGreen << "- " << message << console::kReset << "\n";
+            }
+            std::cout << "\n";
+
             if (verboseMode)
             {
-                std::cout << "Refresh button: (" << coords.refreshX << ", " << coords.refreshY << ")\n";
-                std::cout << "Buy button: (" << coords.buyX << ", " << coords.buyY << ")\n";
+                std::cout << "Refresh button bounds: X[" << coords.refreshMinX << ", " << coords.refreshMaxX
+                          << "] Y[" << coords.refreshMinY << ", " << coords.refreshMaxY << "]\n";
+                std::cout << "Buy button bounds: X[" << coords.buyMinX << ", " << coords.buyMaxX
+                          << "] Y[" << coords.buyMinY << ", " << coords.buyMaxY << "]\n";
                 std::cout << "First row region: (" << coords.cropX << ", " << coords.cropY << ") size "
                           << coords.cropWidth << "x" << coords.cropHeight << "\n";
                 std::cout << "Quiet mode: " << (quietMode ? "ON" : "OFF") << " (set DUSKULL_QUIET=1 to enable)\n";
@@ -800,6 +852,10 @@ namespace gtl
                 {
                     std::cout << "Click safety: no frontmost app restriction (set DUSKULL_EXPECTED_APP_OWNER to enable).\n";
                 }
+                std::cout << "Click randomization bounds (calibrated): Refresh X[" << coords.refreshMinX << "," << coords.refreshMaxX
+                          << "] Y[" << coords.refreshMinY << "," << coords.refreshMaxY
+                          << "] Buy X[" << coords.buyMinX << "," << coords.buyMaxX
+                          << "] Y[" << coords.buyMinY << "," << coords.buyMaxY << "].\n";
             }
 
             std::unordered_set<std::string> previousMatches;
@@ -814,13 +870,14 @@ namespace gtl
                 }
 
                 std::string refreshClickError;
+                const auto refreshClickTarget = jitterClickTarget(coords.refreshBounds(), display, "refresh");
                 if (frontmostAppMatchesExpected(expectedAppOwner, quietMode, "refresh click") &&
-                    !macos_native::clickAt(coords.refreshX, coords.refreshY, refreshClickError) && !quietMode)
+                    !macos_native::clickAt(refreshClickTarget.first, refreshClickTarget.second, refreshClickError) && !quietMode)
                 {
                     console::printError("Failed to click refresh button: " + refreshClickError);
                 }
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                std::this_thread::sleep_for(std::chrono::milliseconds(nextRefreshDelayMs()));
 
                 const auto detectedTexts = captureFirstRowRegion(coords, quietMode);
                 if (detectedTexts.empty())
@@ -845,7 +902,7 @@ namespace gtl
                     std::cout << "\nScanned first row: ";
                     for (const auto &text : detectedTexts)
                     {
-                        std::cout << "[" << sanitizeForTerminal(text) << "] ";
+                        std::cout << "[" << duskull::util::sanitizeForTerminal(text) << "] ";
                     }
                     std::cout << "\n";
                 }
@@ -921,10 +978,10 @@ namespace gtl
                         const std::string levelName = level.empty() ? name : (level + " " + name);
                         const std::string detectedNature = extractNatureFromDetectedTexts(detectedTexts);
 
-                        std::cout << kAnsiGreen << "[BOUGHT]" << kAnsiReset << " " << levelName;
+                        std::cout << console::kGreen << "[BOUGHT]" << console::kReset << " " << levelName;
                         if (!detectedNature.empty())
                         {
-                            std::cout << " | " << kAnsiBlue << detectedNature << kAnsiReset;
+                            std::cout << " | " << console::kBlue << detectedNature << console::kReset;
                         }
                         int totalIv = 0;
                         for (const int value : ivData.ivs)
@@ -951,13 +1008,16 @@ namespace gtl
 
                     if (matchedPrice)
                     {
+                        const auto buyClickTarget = jitterClickTarget(coords.buyBounds(), display, "buy");
                         if (verboseMode)
                         {
-                            std::cout << "  Clicking buy button at (" << coords.buyX << ", " << coords.buyY << ")...\n";
+                            std::cout << "  Clicking buy button in bounds X[" << coords.buyMinX << ", " << coords.buyMaxX
+                                      << "] Y[" << coords.buyMinY << ", " << coords.buyMaxY
+                                      << "] at (" << buyClickTarget.first << ", " << buyClickTarget.second << ")...\n";
                         }
                         std::string buyClickError;
                         if (frontmostAppMatchesExpected(expectedAppOwner, quietMode, "buy click") &&
-                            !macos_native::clickAt(coords.buyX, coords.buyY, buyClickError))
+                            !macos_native::clickAt(buyClickTarget.first, buyClickTarget.second, buyClickError))
                         {
                             const std::string prefix = verboseMode ? "  " : "";
                             console::printError(prefix + "Buy click failed: " + buyClickError);
@@ -987,7 +1047,7 @@ namespace gtl
             calibration::CoordinateSet coords;
             calibration::promptCaptureCoordinates(coords);
 
-            if (coords.refreshX == 0 || coords.buyX == 0 || coords.cropWidth == 0)
+            if (!coords.isComplete())
             {
                 console::printError("Coordinate capture was incomplete. Recalibration cancelled.");
                 return;
@@ -1033,7 +1093,8 @@ namespace gtl
 
                 const auto csvSelection = console::promptMenuChoice(
                     csvMenuItems,
-                    "Choose a CSV file...",
+                    "Select CSV",
+                    "",
                     "Invalid choice. Select one of the listed CSV files.");
 
                 if (!csvSelection)
@@ -1053,34 +1114,52 @@ namespace gtl
                 }
 
                 const auto &selectedCsv = csvFiles[static_cast<std::size_t>(*csvSelection - 1)];
-                console::printSuccess("Selected CSV: " + selectedCsv.filename().string());
-
-                while (true)
+                if (!persistSelectedCsv(selectedCsv))
                 {
-                    if (macos_native::isEmergencyAbortRequested())
-                    {
-                        console::printError("Emergency abort requested (Escape). Returning to menu.");
-                        macos_native::clearEmergencyAbortRequested();
-                        return;
-                    }
+                    console::printError("Failed to save selected CSV.");
+                    return;
+                }
 
-                    const auto startSelection = console::promptMenuChoice(
-                        kStartMenuItems,
-                        "Choose an operation...",
-                        "Invalid choice. Try 0-1.");
+                console::printSuccess("Selected CSV saved: " + selectedCsv.filename().string());
+                return;
+            }
+        }
 
-                    if (!startSelection)
-                    {
-                        continue;
-                    }
+        void settingsFlow()
+        {
+            while (true)
+            {
+                if (macos_native::isEmergencyAbortRequested())
+                {
+                    console::printError("Emergency abort requested (Escape). Returning to menu.");
+                    macos_native::clearEmergencyAbortRequested();
+                    return;
+                }
 
-                    if (*startSelection == 0)
-                    {
-                        break;
-                    }
+                const auto selection = console::promptMenuChoice(
+                    kSettingsMenuItems,
+                    "Settings",
+                    "",
+                    "Invalid choice. Try 0-3.");
 
-                    startSniper(selectedCsv);
+                if (!selection)
+                {
+                    continue;
+                }
+
+                switch (*selection)
+                {
+                case SelectCsv:
+                    selectCsvFlow();
                     break;
+                case CreateCsv:
+                    createCsv();
+                    break;
+                case RecalibrateCoordinates:
+                    recalibrateCoordinatesFlow();
+                    break;
+                case SettingsBack:
+                    return;
                 }
             }
         }
@@ -1090,7 +1169,7 @@ namespace gtl
             std::string baseName;
             std::cout << "\nEnter a name for the CSV file (without extension): ";
             std::getline(std::cin >> std::ws, baseName);
-            const std::string baseNameTrimmed = trim(baseName);
+            const std::string baseNameTrimmed = duskull::util::trim(baseName);
 
             if (!isValidFileName(baseNameTrimmed))
             {
@@ -1127,7 +1206,7 @@ namespace gtl
             }
 
             std::string writeError;
-            if (!writeTextFileAtomically(csvPath, std::string(kCsvHeader), writeError))
+            if (!duskull::util::writeTextFileAtomically(csvPath, kCsvHeader, writeError))
             {
                 console::printError(writeError);
                 return;
@@ -1149,8 +1228,9 @@ namespace gtl
 
             const auto selection = console::promptMenuChoice(
                 kGtlMenuItems,
-                "Choose an operation...",
-                "Invalid choice. Try 0-3.");
+                "GTL Sniper",
+                buildGtlMainContext(),
+                "Invalid choice. Try 0-2.");
 
             if (!selection)
             {
@@ -1159,16 +1239,22 @@ namespace gtl
 
             switch (*selection)
             {
-            case CreateCsv:
-                createCsv();
+            case Start:
+            {
+                const auto selectedCsv = loadPersistedSelectedCsv();
+                if (!selectedCsv)
+                {
+                    console::printError("No CSV selected. Open Settings and choose Select CSV before starting.");
+                    break;
+                }
+
+                startSniper(*selectedCsv);
                 break;
-            case SelectCsv:
-                selectCsvFlow();
+            }
+            case Settings:
+                settingsFlow();
                 break;
-            case RecalibrateCoordinates:
-                recalibrateCoordinatesFlow();
-                break;
-            case Exit:
+            case Back:
                 return;
             }
         }

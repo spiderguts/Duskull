@@ -11,51 +11,17 @@
 #include <iostream>
 
 #include "console.h"
+#include "duskull_util.h"
 #include "gtl_csv.h"
 
 namespace gtl::match
 {
     namespace
     {
-        std::string trim(const std::string &in)
-        {
-            const auto start = std::find_if_not(in.begin(), in.end(), [](unsigned char ch)
-                                                { return std::isspace(ch); });
-            const auto end = std::find_if_not(in.rbegin(), in.rend(), [](unsigned char ch)
-                                              { return std::isspace(ch); })
-                                 .base();
-            return (start < end) ? std::string(start, end) : std::string();
-        }
-
-        bool equalsIgnoreCase(std::string_view left, std::string_view right)
-        {
-            if (left.size() != right.size())
-            {
-                return false;
-            }
-
-            return std::equal(left.begin(), left.end(), right.begin(),
-                              [](unsigned char lch, unsigned char rch)
-                              {
-                                  return std::tolower(lch) == std::tolower(rch);
-                              });
-        }
-
-        std::string toLowerAscii(std::string_view text)
-        {
-            std::string lowered;
-            lowered.reserve(text.size());
-            for (const char ch : text)
-            {
-                lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-            }
-            return lowered;
-        }
-
         bool containsTextIgnoreCaseInLine(std::string_view detected, std::string_view value)
         {
-            const std::string detectedLower = toLowerAscii(detected);
-            const std::string valueLower = toLowerAscii(value);
+            const std::string detectedLower = duskull::util::toLowerAscii(detected);
+            const std::string valueLower = duskull::util::toLowerAscii(value);
             return detectedLower == valueLower || detectedLower.find(valueLower) != std::string::npos;
         }
 
@@ -63,44 +29,6 @@ namespace gtl::match
         {
             return std::any_of(detectedTexts.begin(), detectedTexts.end(), [value](const std::string &detected)
                                { return containsTextIgnoreCaseInLine(detected, value); });
-        }
-
-        std::optional<long long> parseWholeNumber(std::string_view text)
-        {
-            std::string digitsOnly;
-            digitsOnly.reserve(text.size());
-
-            for (const char ch : text)
-            {
-                if (std::isdigit(static_cast<unsigned char>(ch)))
-                {
-                    digitsOnly.push_back(ch);
-                    continue;
-                }
-
-                if (ch != ',')
-                {
-                    return std::nullopt;
-                }
-            }
-
-            if (digitsOnly.empty())
-            {
-                return std::nullopt;
-            }
-
-            try
-            {
-                return std::stoll(digitsOnly);
-            }
-            catch (const std::invalid_argument &)
-            {
-                return std::nullopt;
-            }
-            catch (const std::out_of_range &)
-            {
-                return std::nullopt;
-            }
         }
 
         std::vector<long long> extractNumbersFromLine(std::string_view line)
@@ -115,7 +43,7 @@ namespace gtl::match
                     return;
                 }
 
-                const auto parsed = parseWholeNumber(token);
+                const auto parsed = duskull::util::parseWholeNumber(token);
                 if (parsed)
                 {
                     numbers.push_back(*parsed);
@@ -207,7 +135,7 @@ namespace gtl::match
                 const bool hasComma = token.find(',') != std::string::npos;
                 if (hasComma)
                 {
-                    const auto parsed = parseWholeNumber(token);
+                    const auto parsed = duskull::util::parseWholeNumber(token);
                     if (parsed)
                     {
                         numbers.push_back(*parsed);
@@ -269,7 +197,7 @@ namespace gtl::match
                     }
                 }
 
-                const auto parsed = parseWholeNumber(token);
+                const auto parsed = duskull::util::parseWholeNumber(token);
                 if (parsed)
                 {
                     numbers.push_back(*parsed);
@@ -294,7 +222,7 @@ namespace gtl::match
             return kDefaultRefreshMs;
         }
 
-        const auto parsed = parseWholeNumber(envValue);
+        const auto parsed = duskull::util::parseWholeNumber(envValue);
         if (!parsed || *parsed <= 0 || *parsed > 10000)
         {
             console::printError("Invalid DUSKULL_REFRESH_MS; using default 1000ms.");
@@ -306,47 +234,17 @@ namespace gtl::match
 
     bool readQuietMode()
     {
-        const char *raw = std::getenv("DUSKULL_QUIET");
-        if (raw == nullptr)
-        {
-            return false;
-        }
-
-        const std::string value = trim(raw);
-        return equalsIgnoreCase(value, "1") ||
-               equalsIgnoreCase(value, "true") ||
-               equalsIgnoreCase(value, "yes") ||
-               equalsIgnoreCase(value, "on");
+        return duskull::util::isTruthyEnvValue(std::getenv("DUSKULL_QUIET"));
     }
 
     bool readDebugOcrLoggingMode()
     {
-        const char *raw = std::getenv("DUSKULL_DEBUG_OCR");
-        if (raw == nullptr)
-        {
-            return false;
-        }
-
-        const std::string value = trim(raw);
-        return equalsIgnoreCase(value, "1") ||
-               equalsIgnoreCase(value, "true") ||
-               equalsIgnoreCase(value, "yes") ||
-               equalsIgnoreCase(value, "on");
+        return duskull::util::isTruthyEnvValue(std::getenv("DUSKULL_DEBUG_OCR"));
     }
 
     bool readVerboseMode()
     {
-        const char *raw = std::getenv("DUSKULL_VERBOSE");
-        if (raw == nullptr)
-        {
-            return false;
-        }
-
-        const std::string value = trim(raw);
-        return equalsIgnoreCase(value, "1") ||
-               equalsIgnoreCase(value, "true") ||
-               equalsIgnoreCase(value, "yes") ||
-               equalsIgnoreCase(value, "on");
+        return duskull::util::isTruthyEnvValue(std::getenv("DUSKULL_VERBOSE"));
     }
 
     bool runPriceParserSelfTests()

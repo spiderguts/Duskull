@@ -5,11 +5,11 @@
 
 #include <iostream>
 #include <array>
-#include <cctype>
 #include <cstdlib>
 #include <string_view>
 
 #include "console.h"
+#include "duskull_util.h"
 #include "gtl.h"
 #include "gtl_match.h"
 
@@ -21,35 +21,27 @@ namespace
         Buy = 1,
     };
 
-    constexpr std::string_view kVersion = "Alpha v0.2.0";
+    constexpr std::string_view kVersion = "Alpha v0.2.1";
+    constexpr std::string_view kAsciiLogo = R"( ____  _   _ ____  _  ___   _ _     _     
+|  _ \| | | / ___|| |/ / | | | |   | |    
+| | | | | | \___ \| ' /| | | | |   | |    
+| |_| | |_| |___) | . \| |_| | |___| |___ 
+|____/ \___/|____/|_|\_\\___/|_____|_____|
+)";
     const std::array<console::MenuItem, 2> kMainMenuItems{{
-        {Buy, "GTL Buying"},
+        {Buy, "GTL Sniper"},
         {Exit, "Exit"},
     }};
 
-    bool isTruthyEnvValue(const char *raw)
-    {
-        if (raw == nullptr)
-        {
-            return false;
-        }
-
-        std::string lowered;
-        for (const char ch : std::string_view(raw))
-        {
-            lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-        }
-
-        return lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on";
-    }
 }
 
 int main()
 {
-    std::cout << "\nDuskull " << kVersion << "\n"
+    std::cout << '\n' << console::kPurple << kAsciiLogo << console::kReset
+              << "Duskull " << kVersion << "\n"
               << "Copyright (c) 2026 Duskull Project. All rights reserved.\n";
 
-    if (isTruthyEnvValue(std::getenv("DUSKULL_SELF_TEST")))
+    if (duskull::util::isTruthyEnvValue(std::getenv("DUSKULL_SELF_TEST")))
     {
         const bool testsPassed = gtl::match::runPriceParserSelfTests();
         return testsPassed ? 0 : 1;
@@ -59,7 +51,8 @@ int main()
     {
         const auto selection = console::promptMenuChoice(
             kMainMenuItems,
-            "Choose an operation...",
+            "Main Menu",
+            "",
             "Invalid choice. Try 0-1.");
 
         if (!selection)
@@ -73,7 +66,9 @@ int main()
             gtl::runSniper();
             break;
         case Exit:
-            std::cout << "\nThank you for using Duskull <3\n";
+            std::cout << '\n'
+                      << console::kPurple << "<3 THANK YOU FOR USING DUSKULL! <3" << console::kReset
+                      << '\n';
             return 0;
         }
     }

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   contents: write
@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build macOS binary
         shell: bash
@@ -34,7 +34,7 @@ jobs:
           strip ../Duskull
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
@@ -86,7 +86,7 @@ jobs:
           zip -j Duskull-macos-arm64.zip Duskull
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Duskull-macos-arm64
           path: Duskull-macos-arm64.zip
@@ -97,13 +97,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Enable MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
@@ -128,7 +128,7 @@ jobs:
 
       - name: Upload Windows build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: windows-build-log
           path: windows-build.log
@@ -193,7 +193,7 @@ jobs:
           Compress-Archive -Path .\Duskull.exe -DestinationPath .\Duskull-windows-x64.zip -Force
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Duskull-windows-x64
           path: Duskull-windows-x64.zip
@@ -205,7 +205,7 @@ jobs:
 
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: release-assets
 

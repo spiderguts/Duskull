@@ -12,17 +12,17 @@ namespace macos_native
 {
     struct HumanInputProfile
     {
-        int moveStepDelayMinMs = 5;
-        int moveStepDelayMaxMs = 18;
-        int clickDwellMinMs = 80;
-        int clickDwellMaxMs = 280;
-        int clickHoldMinMs = 40;
-        int clickHoldMaxMs = 120;
-        int keyInterDelayMinMs = 50;
-        int keyInterDelayMaxMs = 220;
-        int keyHoldMinMs = 30;
-        int keyHoldMaxMs = 110;
-        double pathJitterPx = 0.9;
+        int moveStepDelayMinMs = 3;
+        int moveStepDelayMaxMs = 11;
+        int clickDwellMinMs = 120;
+        int clickDwellMaxMs = 420;
+        int clickHoldMinMs = 55;
+        int clickHoldMaxMs = 180;
+        int keyInterDelayMinMs = 24;
+        int keyInterDelayMaxMs = 90;
+        int keyHoldMinMs = 14;
+        int keyHoldMaxMs = 45;
+        double pathJitterPx = 0.65;
     };
 
     struct DisplayMetrics

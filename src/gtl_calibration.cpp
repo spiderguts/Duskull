@@ -6,89 +6,43 @@
 #include "gtl_calibration.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <cctype>
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <optional>
-#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
 
 #include "console.h"
+#include "duskull_util.h"
 #include "macos_native.h"
 
 namespace gtl::calibration
 {
     namespace
     {
-        std::string trim(const std::string &in)
+        struct CoordinateFieldDescriptor
         {
-            const auto start = std::find_if_not(in.begin(), in.end(), [](unsigned char ch)
-                                                { return std::isspace(ch); });
-            const auto end = std::find_if_not(in.rbegin(), in.rend(), [](unsigned char ch)
-                                              { return std::isspace(ch); })
-                                 .base();
-            return (start < end) ? std::string(start, end) : std::string();
-        }
+            const char *envName;
+            const char *configKey;
+            long long CoordinateSet::*member;
+        };
 
-        bool existingPathContainsSymlink(const std::filesystem::path &path,
-                                         std::filesystem::path &symlinkPath)
-        {
-            if (path.empty())
-            {
-                return false;
-            }
-
-            const auto normalized = path.lexically_normal();
-            std::filesystem::path current = normalized.root_path();
-
-            for (const auto &part : normalized.relative_path())
-            {
-                current /= part;
-
-                std::error_code statusError;
-                const auto status = std::filesystem::symlink_status(current, statusError);
-                if (statusError)
-                {
-                    continue;
-                }
-
-                if (!std::filesystem::exists(status))
-                {
-                    break;
-                }
-
-                if (std::filesystem::is_symlink(status))
-                {
-                    symlinkPath = current;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        bool setOwnerOnlyPermissions(const std::filesystem::path &targetPath,
-                                     std::string &error)
-        {
-            std::error_code permissionsError;
-            std::filesystem::permissions(targetPath,
-                                         std::filesystem::perms::owner_read |
-                                             std::filesystem::perms::owner_write,
-                                         std::filesystem::perm_options::replace,
-                                         permissionsError);
-            if (permissionsError)
-            {
-                error = "Failed to set secure file permissions on '" + targetPath.string() + "': " +
-                        permissionsError.message();
-                return false;
-            }
-
-            return true;
-        }
+        constexpr std::array<CoordinateFieldDescriptor, 12> kCoordinateFields{{
+            {"DUSKULL_REFRESH_MIN_X", "refresh_min_x", &CoordinateSet::refreshMinX},
+            {"DUSKULL_REFRESH_MAX_X", "refresh_max_x", &CoordinateSet::refreshMaxX},
+            {"DUSKULL_REFRESH_MIN_Y", "refresh_min_y", &CoordinateSet::refreshMinY},
+            {"DUSKULL_REFRESH_MAX_Y", "refresh_max_y", &CoordinateSet::refreshMaxY},
+            {"DUSKULL_BUY_MIN_X", "buy_min_x", &CoordinateSet::buyMinX},
+            {"DUSKULL_BUY_MAX_X", "buy_max_x", &CoordinateSet::buyMaxX},
+            {"DUSKULL_BUY_MIN_Y", "buy_min_y", &CoordinateSet::buyMinY},
+            {"DUSKULL_BUY_MAX_Y", "buy_max_y", &CoordinateSet::buyMaxY},
+            {"DUSKULL_FIRST_ROW_CROP_X", "crop_x", &CoordinateSet::cropX},
+            {"DUSKULL_FIRST_ROW_CROP_Y", "crop_y", &CoordinateSet::cropY},
+            {"DUSKULL_FIRST_ROW_CROP_W", "crop_w", &CoordinateSet::cropWidth},
+            {"DUSKULL_FIRST_ROW_CROP_H", "crop_h", &CoordinateSet::cropHeight},
+        }};
 
         bool validateAndClampCoordinates(CoordinateSet &coords,
                                          const macos_native::DisplayMetrics &metrics,
@@ -127,10 +81,14 @@ namespace gtl::calibration
                 adjusted = adjusted || (before != value);
             };
 
-            clampPointX(coords.refreshX);
-            clampPointY(coords.refreshY);
-            clampPointX(coords.buyX);
-            clampPointY(coords.buyY);
+            clampPointX(coords.refreshMinX);
+            clampPointX(coords.refreshMaxX);
+            clampPointY(coords.refreshMinY);
+            clampPointY(coords.refreshMaxY);
+            clampPointX(coords.buyMinX);
+            clampPointX(coords.buyMaxX);
+            clampPointY(coords.buyMinY);
+            clampPointY(coords.buyMaxY);
             clampPointX(coords.cropX);
             clampPointY(coords.cropY);
 
@@ -142,6 +100,15 @@ namespace gtl::calibration
             coords.cropWidth = clamp(coords.cropWidth, 1LL, maxCropWidth);
             coords.cropHeight = clamp(coords.cropHeight, 1LL, maxCropHeight);
             adjusted = adjusted || (originalCropWidth != coords.cropWidth) || (originalCropHeight != coords.cropHeight);
+
+            if (coords.refreshMinX > coords.refreshMaxX ||
+                coords.refreshMinY > coords.refreshMaxY ||
+                coords.buyMinX > coords.buyMaxX ||
+                coords.buyMinY > coords.buyMaxY)
+            {
+                diagnostic = "Click bounds are invalid. Ensure min coordinates do not exceed max coordinates.";
+                return false;
+            }
 
             if (adjusted)
             {
@@ -157,11 +124,15 @@ namespace gtl::calibration
         {
             const auto exceedsPointSpace = [&coords, &metrics]()
             {
-                return coords.refreshX > metrics.widthPoints ||
-                       coords.buyX > metrics.widthPoints ||
+                return coords.refreshMinX > metrics.widthPoints ||
+                       coords.refreshMaxX > metrics.widthPoints ||
+                       coords.buyMinX > metrics.widthPoints ||
+                       coords.buyMaxX > metrics.widthPoints ||
                        coords.cropX > metrics.widthPoints ||
-                       coords.refreshY > metrics.heightPoints ||
-                       coords.buyY > metrics.heightPoints ||
+                       coords.refreshMinY > metrics.heightPoints ||
+                       coords.refreshMaxY > metrics.heightPoints ||
+                       coords.buyMinY > metrics.heightPoints ||
+                       coords.buyMaxY > metrics.heightPoints ||
                        coords.cropY > metrics.heightPoints ||
                        (coords.cropX + coords.cropWidth) > metrics.widthPoints ||
                        (coords.cropY + coords.cropHeight) > metrics.heightPoints;
@@ -182,105 +153,20 @@ namespace gtl::calibration
                 return static_cast<long long>(std::llround(static_cast<double>(value) / scale));
             };
 
-            coords.refreshX = scaleDown(coords.refreshX);
-            coords.refreshY = scaleDown(coords.refreshY);
-            coords.buyX = scaleDown(coords.buyX);
-            coords.buyY = scaleDown(coords.buyY);
+            coords.refreshMinX = scaleDown(coords.refreshMinX);
+            coords.refreshMaxX = scaleDown(coords.refreshMaxX);
+            coords.refreshMinY = scaleDown(coords.refreshMinY);
+            coords.refreshMaxY = scaleDown(coords.refreshMaxY);
+            coords.buyMinX = scaleDown(coords.buyMinX);
+            coords.buyMaxX = scaleDown(coords.buyMaxX);
+            coords.buyMinY = scaleDown(coords.buyMinY);
+            coords.buyMaxY = scaleDown(coords.buyMaxY);
             coords.cropX = scaleDown(coords.cropX);
             coords.cropY = scaleDown(coords.cropY);
             coords.cropWidth = scaleDown(coords.cropWidth);
             coords.cropHeight = scaleDown(coords.cropHeight);
 
             note = "Retina scale detected. Converted calibration from pixel-style values to display points.";
-        }
-
-        bool writeFileAtomically(const std::filesystem::path &targetPath,
-                                 const std::string &content,
-                                 std::string &error)
-        {
-            const std::filesystem::path parent = targetPath.parent_path();
-            if (!parent.empty())
-            {
-                std::filesystem::path symlinkPath;
-                if (existingPathContainsSymlink(parent, symlinkPath))
-                {
-                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
-                    return false;
-                }
-
-                std::error_code dirError;
-                std::filesystem::create_directories(parent, dirError);
-                if (dirError)
-                {
-                    error = "Failed to create directory: " + dirError.message();
-                    return false;
-                }
-
-                if (existingPathContainsSymlink(parent, symlinkPath))
-                {
-                    error = "Refusing to write through symlinked directory component: '" + symlinkPath.string() + "'.";
-                    return false;
-                }
-            }
-
-            std::error_code statusError;
-            const auto targetStatus = std::filesystem::symlink_status(targetPath, statusError);
-            if (!statusError && std::filesystem::exists(targetStatus) && std::filesystem::is_symlink(targetStatus))
-            {
-                error = "Refusing to write through symlinked target: '" + targetPath.string() + "'.";
-                return false;
-            }
-
-            std::random_device rd;
-            std::stringstream suffix;
-            suffix << ".tmp." << std::hex << rd();
-            const std::filesystem::path tempPath = targetPath.string() + suffix.str();
-
-            {
-                std::ofstream tempFile(tempPath, std::ios::out | std::ios::trunc);
-                if (!tempFile)
-                {
-                    error = "Failed to open temp file for writing: '" + tempPath.string() + "'.";
-                    return false;
-                }
-
-                tempFile << content;
-                if (!tempFile.good())
-                {
-                    std::filesystem::remove(tempPath);
-                    error = "Failed while writing temp file: '" + tempPath.string() + "'.";
-                    return false;
-                }
-            }
-
-            std::error_code replaceError;
-            std::filesystem::rename(tempPath, targetPath, replaceError);
-            if (!replaceError)
-            {
-                return setOwnerOnlyPermissions(targetPath, error);
-            }
-
-            std::error_code secondStatusError;
-            const auto secondStatus = std::filesystem::symlink_status(targetPath, secondStatusError);
-            if (!secondStatusError && std::filesystem::exists(secondStatus) && std::filesystem::is_symlink(secondStatus))
-            {
-                std::filesystem::remove(tempPath);
-                error = "Refusing to replace symlinked target after rename retry: '" + targetPath.string() + "'.";
-                return false;
-            }
-
-            std::error_code removeError;
-            std::filesystem::remove(targetPath, removeError);
-            std::error_code secondRenameError;
-            std::filesystem::rename(tempPath, targetPath, secondRenameError);
-            if (!secondRenameError)
-            {
-                return setOwnerOnlyPermissions(targetPath, error);
-            }
-
-            std::filesystem::remove(tempPath);
-            error = "Failed to atomically replace file '" + targetPath.string() + "': " + secondRenameError.message();
-            return false;
         }
     }
 
@@ -291,47 +177,15 @@ namespace gtl::calibration
 
     bool loadCoordinatesFromEnv(CoordinateSet &coords, std::string &diagnostic)
     {
-        const auto parseInt = [](const char *name) -> std::optional<long long>
+        for (const auto &field : kCoordinateFields)
         {
-            const char *value = std::getenv(name);
-            if (value == nullptr)
-            {
-                return std::nullopt;
-            }
-            try
-            {
-                return std::stoll(value);
-            }
-            catch (const std::invalid_argument &)
-            {
-                return std::nullopt;
-            }
-            catch (const std::out_of_range &)
-            {
-                return std::nullopt;
-            }
-        };
-
-        std::vector<std::pair<const char *, long long *>> requiredCoords{
-            {"DUSKULL_REFRESH_X", &coords.refreshX},
-            {"DUSKULL_REFRESH_Y", &coords.refreshY},
-            {"DUSKULL_BUY_X", &coords.buyX},
-            {"DUSKULL_BUY_Y", &coords.buyY},
-            {"DUSKULL_FIRST_ROW_CROP_X", &coords.cropX},
-            {"DUSKULL_FIRST_ROW_CROP_Y", &coords.cropY},
-            {"DUSKULL_FIRST_ROW_CROP_W", &coords.cropWidth},
-            {"DUSKULL_FIRST_ROW_CROP_H", &coords.cropHeight},
-        };
-
-        for (const auto &[envName, coordPtr] : requiredCoords)
-        {
-            const auto value = parseInt(envName);
+            const auto value = duskull::util::parseSignedInteger(duskull::util::readTrimmedEnv(field.envName));
             if (!value)
             {
-                diagnostic += std::string(envName) + " not set or invalid. ";
+                diagnostic += std::string(field.envName) + " not set or invalid. ";
                 return false;
             }
-            *coordPtr = *value;
+            coords.*(field.member) = *value;
         }
 
         return true;
@@ -348,19 +202,12 @@ namespace gtl::calibration
             return false;
         }
 
-        bool sawRefreshX = false;
-        bool sawRefreshY = false;
-        bool sawBuyX = false;
-        bool sawBuyY = false;
-        bool sawCropX = false;
-        bool sawCropY = false;
-        bool sawCropW = false;
-        bool sawCropH = false;
+        std::array<bool, kCoordinateFields.size()> sawField{};
 
         std::string line;
         while (std::getline(configFile, line))
         {
-            const std::string cleaned = trim(line);
+            const std::string cleaned = duskull::util::trim(line);
             if (cleaned.empty() || cleaned.front() == '#')
             {
                 continue;
@@ -372,68 +219,30 @@ namespace gtl::calibration
                 continue;
             }
 
-            const std::string key = trim(cleaned.substr(0, equalsPos));
-            const std::string valueText = trim(cleaned.substr(equalsPos + 1));
-            long long parsedValue = 0;
-            try
-            {
-                parsedValue = std::stoll(valueText);
-            }
-            catch (const std::invalid_argument &)
-            {
-                diagnostic = "Invalid number for key '" + key + "' in config file.";
-                return false;
-            }
-            catch (const std::out_of_range &)
+            const std::string key = duskull::util::trim(cleaned.substr(0, equalsPos));
+            const std::string valueText = duskull::util::trim(cleaned.substr(equalsPos + 1));
+            const auto parsedValue = duskull::util::parseSignedInteger(valueText);
+            if (!parsedValue)
             {
                 diagnostic = "Invalid number for key '" + key + "' in config file.";
                 return false;
             }
 
-            if (key == "refresh_x")
+            for (std::size_t index = 0; index < kCoordinateFields.size(); ++index)
             {
-                coords.refreshX = parsedValue;
-                sawRefreshX = true;
-            }
-            else if (key == "refresh_y")
-            {
-                coords.refreshY = parsedValue;
-                sawRefreshY = true;
-            }
-            else if (key == "buy_x")
-            {
-                coords.buyX = parsedValue;
-                sawBuyX = true;
-            }
-            else if (key == "buy_y")
-            {
-                coords.buyY = parsedValue;
-                sawBuyY = true;
-            }
-            else if (key == "crop_x")
-            {
-                coords.cropX = parsedValue;
-                sawCropX = true;
-            }
-            else if (key == "crop_y")
-            {
-                coords.cropY = parsedValue;
-                sawCropY = true;
-            }
-            else if (key == "crop_w")
-            {
-                coords.cropWidth = parsedValue;
-                sawCropW = true;
-            }
-            else if (key == "crop_h")
-            {
-                coords.cropHeight = parsedValue;
-                sawCropH = true;
+                if (key != kCoordinateFields[index].configKey)
+                {
+                    continue;
+                }
+
+                coords.*(kCoordinateFields[index].member) = *parsedValue;
+                sawField[index] = true;
+                break;
             }
         }
 
-        if (!(sawRefreshX && sawRefreshY && sawBuyX && sawBuyY &&
-              sawCropX && sawCropY && sawCropW && sawCropH))
+        if (std::any_of(sawField.begin(), sawField.end(), [](bool seen)
+                        { return !seen; }))
         {
             diagnostic = "Config file is missing one or more required keys.";
             return false;
@@ -448,16 +257,12 @@ namespace gtl::calibration
     {
         std::ostringstream content;
         content << "# Duskull coordinate calibration\n";
-        content << "refresh_x=" << coords.refreshX << "\n";
-        content << "refresh_y=" << coords.refreshY << "\n";
-        content << "buy_x=" << coords.buyX << "\n";
-        content << "buy_y=" << coords.buyY << "\n";
-        content << "crop_x=" << coords.cropX << "\n";
-        content << "crop_y=" << coords.cropY << "\n";
-        content << "crop_w=" << coords.cropWidth << "\n";
-        content << "crop_h=" << coords.cropHeight << "\n";
+        for (const auto &field : kCoordinateFields)
+        {
+            content << field.configKey << "=" << coords.*(field.member) << "\n";
+        }
 
-        return writeFileAtomically(configPath, content.str(), error);
+        return duskull::util::writeTextFileAtomically(configPath, content.str(), error);
     }
 
     void promptCaptureCoordinates(CoordinateSet &coords)
@@ -491,14 +296,32 @@ namespace gtl::calibration
         long long cropRightX = 0;
         long long cropBottomY = 0;
 
-        if (!captureCursorPoint("1. Hover over the Refresh button", coords.refreshX, coords.refreshY))
+        if (!captureCursorPoint("1. Hover over Refresh button TOP-LEFT corner", coords.refreshMinX, coords.refreshMinY))
             return;
-        if (!captureCursorPoint("2. Hover over the Buy button", coords.buyX, coords.buyY))
+        if (!captureCursorPoint("2. Hover over Refresh button BOTTOM-RIGHT corner", coords.refreshMaxX, coords.refreshMaxY))
             return;
-        if (!captureCursorPoint("3. Hover over first-row OCR region TOP-LEFT", coords.cropX, coords.cropY))
+        if (!captureCursorPoint("3. Hover over Buy button TOP-LEFT corner", coords.buyMinX, coords.buyMinY))
             return;
-        if (!captureCursorPoint("4. Hover over first-row OCR region BOTTOM-RIGHT", cropRightX, cropBottomY))
+        if (!captureCursorPoint("4. Hover over Buy button BOTTOM-RIGHT corner", coords.buyMaxX, coords.buyMaxY))
             return;
+        if (!captureCursorPoint("5. Hover over first-row OCR region TOP-LEFT", coords.cropX, coords.cropY))
+            return;
+        if (!captureCursorPoint("6. Hover over first-row OCR region BOTTOM-RIGHT", cropRightX, cropBottomY))
+            return;
+
+        if (coords.refreshMaxX <= coords.refreshMinX || coords.refreshMaxY <= coords.refreshMinY)
+        {
+            console::printError("Invalid refresh button bounds. Bottom-right must be lower-right of top-left.");
+            coords = CoordinateSet{};
+            return;
+        }
+
+        if (coords.buyMaxX <= coords.buyMinX || coords.buyMaxY <= coords.buyMinY)
+        {
+            console::printError("Invalid buy button bounds. Bottom-right must be lower-right of top-left.");
+            coords = CoordinateSet{};
+            return;
+        }
 
         if (cropRightX <= coords.cropX || cropBottomY <= coords.cropY)
         {
@@ -512,19 +335,27 @@ namespace gtl::calibration
 
         console::printSuccess("\nCapture complete! Values below can be used as environment overrides if needed:\n");
 #if defined(_WIN32)
-        std::cout << "set DUSKULL_REFRESH_X=" << coords.refreshX << "\n";
-        std::cout << "set DUSKULL_REFRESH_Y=" << coords.refreshY << "\n";
-        std::cout << "set DUSKULL_BUY_X=" << coords.buyX << "\n";
-        std::cout << "set DUSKULL_BUY_Y=" << coords.buyY << "\n";
+        std::cout << "set DUSKULL_REFRESH_MIN_X=" << coords.refreshMinX << "\n";
+        std::cout << "set DUSKULL_REFRESH_MAX_X=" << coords.refreshMaxX << "\n";
+        std::cout << "set DUSKULL_REFRESH_MIN_Y=" << coords.refreshMinY << "\n";
+        std::cout << "set DUSKULL_REFRESH_MAX_Y=" << coords.refreshMaxY << "\n";
+        std::cout << "set DUSKULL_BUY_MIN_X=" << coords.buyMinX << "\n";
+        std::cout << "set DUSKULL_BUY_MAX_X=" << coords.buyMaxX << "\n";
+        std::cout << "set DUSKULL_BUY_MIN_Y=" << coords.buyMinY << "\n";
+        std::cout << "set DUSKULL_BUY_MAX_Y=" << coords.buyMaxY << "\n";
         std::cout << "set DUSKULL_FIRST_ROW_CROP_X=" << coords.cropX << "\n";
         std::cout << "set DUSKULL_FIRST_ROW_CROP_Y=" << coords.cropY << "\n";
         std::cout << "set DUSKULL_FIRST_ROW_CROP_W=" << coords.cropWidth << "\n";
         std::cout << "set DUSKULL_FIRST_ROW_CROP_H=" << coords.cropHeight << "\n\n";
 #else
-        std::cout << "export DUSKULL_REFRESH_X=" << coords.refreshX << "\n";
-        std::cout << "export DUSKULL_REFRESH_Y=" << coords.refreshY << "\n";
-        std::cout << "export DUSKULL_BUY_X=" << coords.buyX << "\n";
-        std::cout << "export DUSKULL_BUY_Y=" << coords.buyY << "\n";
+        std::cout << "export DUSKULL_REFRESH_MIN_X=" << coords.refreshMinX << "\n";
+        std::cout << "export DUSKULL_REFRESH_MAX_X=" << coords.refreshMaxX << "\n";
+        std::cout << "export DUSKULL_REFRESH_MIN_Y=" << coords.refreshMinY << "\n";
+        std::cout << "export DUSKULL_REFRESH_MAX_Y=" << coords.refreshMaxY << "\n";
+        std::cout << "export DUSKULL_BUY_MIN_X=" << coords.buyMinX << "\n";
+        std::cout << "export DUSKULL_BUY_MAX_X=" << coords.buyMaxX << "\n";
+        std::cout << "export DUSKULL_BUY_MIN_Y=" << coords.buyMinY << "\n";
+        std::cout << "export DUSKULL_BUY_MAX_Y=" << coords.buyMaxY << "\n";
         std::cout << "export DUSKULL_FIRST_ROW_CROP_X=" << coords.cropX << "\n";
         std::cout << "export DUSKULL_FIRST_ROW_CROP_Y=" << coords.cropY << "\n";
         std::cout << "export DUSKULL_FIRST_ROW_CROP_W=" << coords.cropWidth << "\n";
